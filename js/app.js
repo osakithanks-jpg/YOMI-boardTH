@@ -123,13 +123,13 @@ class App {
         </div>
       `;
 
-      // 指示書 5項: 一括データ移行ボタンの処理
+      // 指示書 5項: 一括データ移行ボタンの処理 (進捗表示・安全タイムアウト対応)
       bar.querySelector('#btn-migrate-to-firestore').addEventListener('click', async () => {
         const btn = bar.querySelector('#btn-migrate-to-firestore');
         if (!confirm('この端末（localStorage）にある既存データを Firestore サーバーへ一括移行しますか？')) return;
 
         btn.disabled = true;
-        btn.innerText = '移行中...';
+        btn.innerText = '準備中...';
 
         try {
           // localStorage 内の全キーのデータを収集
@@ -143,7 +143,10 @@ class App {
             histories: JSON.parse(localStorage.getItem('selection_app_histories') || '[]')
           };
 
-          const res = await migrateLocalDataToFirestore(dataPackage);
+          const res = await migrateLocalDataToFirestore(dataPackage, (current, total) => {
+            btn.innerText = `移行中... (${current}/${total}件)`;
+          });
+
           alert(`Firestore へのデータ移行が完了しました！\n\n- 選考案件: ${res.selections}件\n- 企業: ${res.companies}件\n- 求人: ${res.jobs}件\n- 候補者: ${res.candidates}件\n- コンサルタント: ${res.consultants}件\n\nプライベートモードまたは別端末でリロードして同じデータが表示されることを確認してください。`);
           this.render();
         } catch (err) {

@@ -181,13 +181,28 @@ export async function fetchCollectionFromServerDirect(collectionName) {
 }
 
 /**
- * 指示書 5項: 端末内データの Firestore サーバーへの一括移行関数
+ * 指示書 5項: 端末内データの Firestore サーバーへの一括移行関数 (タイムアウト ＆ 浄化付き)
  */
-export async function migrateLocalDataToFirestore(dataPackage) {
+export async function migrateLocalDataToFirestore(dataPackage, onProgress) {
   const firestore = initFirebase();
   if (!firestore) {
     throw new Error("Firestore SDK is not initialized");
   }
+
+  const cleanObject = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    return JSON.parse(JSON.stringify(obj, (key, value) => {
+      if (value === undefined) return null;
+      return value;
+    }));
+  };
+
+  const withTimeout = (promise, ms = 3000) => {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Write timeout')), ms))
+    ]);
+  };
 
   const results = {
     selections: 0,
@@ -209,13 +224,33 @@ export async function migrateLocalDataToFirestore(dataPackage) {
     { key: 'histories', collection: 'histories', idField: 'historyId' }
   ];
 
+  let totalItems = 0;
+  collectionsMap.forEach(item => {
+    const list = dataPackage[item.key] || [];
+    totalItems += Array.isArray(list) ? list.length : 0;
+  });
+
+  let processedCount = 0;
+
   for (const item of collectionsMap) {
     const list = dataPackage[item.key] || [];
     if (Array.isArray(list) && list.length > 0) {
-      for (const docData of list) {
-        const docId = String(docData[item.idField] || docData.id || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
-        await firestore.collection(item.collection).doc(docId).set(docData, { merge: true });
-        results[item.key]++;
+      for (const rawData of list) {
+        processedCount++;
+        if (onProgress) onProgress(processedCount, totalItems);
+
+        try {
+          const docData = cleanObject(rawData);
+          const docId = String(docData[item.idField] || docData.id || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
+          
+          await withTimeout(
+            firestore.collection(item.collection).doc(docId).set(docData, { merge: true }),
+            3000
+          );
+          results[item.key]++;
+        } catch (e) {
+          console.warn(`Migration skipped 1 item in ${item.collection}:`, e.message);
+        }
       }
     }
   }
