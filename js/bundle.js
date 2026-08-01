@@ -1,8 +1,7 @@
 /**
- * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・ログ管理モジュール
+ * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・ログ管理・診断モジュール
  */
 
-// Firebase 設定の取得 (グローバル設定または環境変数フォールバック)
 const getFirebaseConfig = () => {
   if (typeof window !== 'undefined' && window.FIREBASE_CONFIG) {
     return window.FIREBASE_CONFIG;
@@ -19,13 +18,37 @@ const getFirebaseConfig = () => {
 let db = null;
 let isFirebaseInitialized = false;
 
+// 診断情報グローバルステート (指示書 1項)
+if (typeof window !== 'undefined') {
+  window.DATA_SOURCE_DEBUG_INFO = {
+    projectId: "selection-progress-app",
+    databaseId: "(default)",
+    collection: "selections",
+    documentPath: "selections/{documentId}",
+    authUid: "unauthenticated",
+    dataSource: "unknown",
+    loadedCount: 0,
+    firstDocId: "-",
+    lastLoadedAt: "-",
+    localStorageCount: 0,
+    indexedDbPersistence: false,
+    rawCount: 0,
+    filteredCount: 0,
+    selectedConsultant: "ALL",
+    selectedPeriod: "ALL",
+    testDocId: "TEST_SHARED_RECORD_20260802",
+    testDocExists: false,
+    testDocValue: "-"
+  };
+}
+
 function initFirebase() {
   if (isFirebaseInitialized) return db;
 
   try {
     const config = getFirebaseConfig();
     
-    // 指示書 3項: FIREBASE_CONFIG_CHECK ログ (機密情報除外)
+    // 指示書 3項: FIREBASE_CONFIG_CHECK ログ
     console.log("FIREBASE_CONFIG_CHECK", {
       projectId: config.projectId,
       appId: config.appId
@@ -36,6 +59,16 @@ function initFirebase() {
         firebase.initializeApp(config);
       }
       db = firebase.firestore();
+
+      // IndexedDB オフライン永続化の確認
+      try {
+        db.enablePersistence({ synchronizeTabs: true }).then(() => {
+          if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.indexedDbPersistence = true;
+        }).catch(() => {
+          if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.indexedDbPersistence = false;
+        });
+      } catch (pe) {}
+
       isFirebaseInitialized = true;
     } else {
       console.warn("Firebase SDK is not loaded. Operating in offline/fallback mode.");
@@ -48,11 +81,24 @@ function initFirebase() {
 }
 
 /**
- * リアルタイムコレクション監視 (指示書 5, 8, 10項)
+ * リアルタイムコレクション監視 (指示書 2, 5, 8, 10項)
  */
 function subscribeCollection(collectionName, onUpdate, onError) {
   const firestore = initFirebase();
+  const config = getFirebaseConfig();
+  const authUid = (typeof firebase !== 'undefined' && firebase.auth) ? (firebase.auth().currentUser?.uid || 'unauthenticated') : 'unauthenticated';
+
+  // 指示書 2項: SHARED_DATA_REFERENCE ログ
+  console.log("SHARED_DATA_REFERENCE", {
+    projectId: config.projectId,
+    databaseId: "(default)",
+    collectionName,
+    documentPath: `${collectionName}/{docId}`,
+    authUid
+  });
+
   if (!firestore) {
+    if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.dataSource = "localStorage";
     if (onError) onError(new Error("Firestore is not available"));
     return () => {};
   }
@@ -65,6 +111,27 @@ function subscribeCollection(collectionName, onUpdate, onError) {
   try {
     const unsubscribe = firestore.collection(collectionName).onSnapshot(
       (snapshot) => {
+        const fromCache = snapshot.metadata ? snapshot.metadata.fromCache : false;
+        const hasPendingWrites = snapshot.metadata ? snapshot.metadata.hasPendingWrites : false;
+
+        // 指示書 5項: FIRESTORE_SNAPSHOT_METADATA ログ
+        console.log("FIRESTORE_SNAPSHOT_METADATA", {
+          collectionName,
+          fromCache,
+          hasPendingWrites
+        });
+
+        // 診断情報の更新
+        if (window.DATA_SOURCE_DEBUG_INFO) {
+          window.DATA_SOURCE_DEBUG_INFO.projectId = config.projectId;
+          window.DATA_SOURCE_DEBUG_INFO.collection = collectionName;
+          window.DATA_SOURCE_DEBUG_INFO.authUid = authUid;
+          window.DATA_SOURCE_DEBUG_INFO.dataSource = fromCache ? "Firestore cache" : "Firestore server";
+          window.DATA_SOURCE_DEBUG_INFO.loadedCount = snapshot.size;
+          window.DATA_SOURCE_DEBUG_INFO.firstDocId = snapshot.docs.length > 0 ? snapshot.docs[0].id : "-";
+          window.DATA_SOURCE_DEBUG_INFO.lastLoadedAt = new Date().toLocaleTimeString();
+        }
+
         // 指示書 8項: SNAPSHOT_RECEIVED ログ
         console.log("SNAPSHOT_RECEIVED", {
           collectionName,
@@ -95,6 +162,7 @@ function subscribeCollection(collectionName, onUpdate, onError) {
           message: error.message
         });
 
+        if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.dataSource = "unknown";
         if (onError) onError(error);
       }
     );
@@ -108,6 +176,63 @@ function subscribeCollection(collectionName, onUpdate, onError) {
     });
     if (onError) onError(err);
     return () => {};
+  }
+}
+
+/**
+ * 明示的サーバーデータ直接フェッチ (指示書 5項: getDocsFromServer)
+ */
+async function fetchCollectionFromServer(collectionName) {
+  const firestore = initFirebase();
+  if (!firestore) return [];
+
+  try {
+    const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
+
+    // 指示書 5項: FIRESTORE_SERVER_RESULT ログ
+    console.log("FIRESTORE_SERVER_RESULT", {
+      collectionName,
+      count: snapshot.size,
+      ids: snapshot.docs.map(doc => doc.id)
+    });
+
+    return snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+  } catch (err) {
+    console.warn(`Server fetch for ${collectionName} failed:`, err);
+    return [];
+  }
+}
+
+/**
+ * 特定1件のテストドキュメント直接検証 (指示書 9項: getDocFromServer)
+ */
+async function verifyTestDocument(collectionName = "selections", testDocId = "TEST_SHARED_RECORD_20260802") {
+  const firestore = initFirebase();
+  if (!firestore) return null;
+
+  try {
+    const docRef = firestore.collection(collectionName).doc(testDocId);
+    const snapshot = await docRef.get({ source: 'server' }).catch(() => docRef.get());
+
+    const exists = snapshot.exists;
+    const val = exists ? JSON.stringify(snapshot.data()).substring(0, 30) + "..." : "not found";
+
+    if (window.DATA_SOURCE_DEBUG_INFO) {
+      window.DATA_SOURCE_DEBUG_INFO.testDocId = testDocId;
+      window.DATA_SOURCE_DEBUG_INFO.testDocExists = exists;
+      window.DATA_SOURCE_DEBUG_INFO.testDocValue = val;
+    }
+
+    console.log("TEST_DOCUMENT_VERIFICATION", {
+      testDocId,
+      exists,
+      data: exists ? snapshot.data() : null
+    });
+
+    return exists ? snapshot.data() : null;
+  } catch (e) {
+    console.warn("Test doc verification failed:", e);
+    return null;
   }
 }
 
@@ -150,9 +275,6 @@ async function saveDocument(collectionName, docId, payload) {
   }
 }
 
-/**
- * Firestore ドキュメント削除
- */
 async function deleteDocument(collectionName, docId) {
   const firestore = initFirebase();
   if (!firestore || !docId) return false;
@@ -527,17 +649,18 @@ class Store {
       subscribeCollection(
         name,
         (items) => {
+          // 指示書 7項: SHARED_DATA_STATE_UPDATED ログ (Firestore からの更新)
+          console.log("SHARED_DATA_STATE_UPDATED", {
+            source: "Firestore",
+            collectionName: name,
+            count: items ? items.length : 0,
+            data: items
+          });
+
           // 指示書 7項: Firestore から取得した正本データでローカル状態およびキャッシュを更新
           if (items && Array.isArray(items)) {
-            // Firestore 内にデータが存在する場合はローカルキャッシュへ保存
             if (items.length > 0) {
               localStorage.setItem(key, JSON.stringify(items));
-            } else {
-              // 初回などで Firestore が空の場合のみ、ローカル初期データが存在すれば初期投入可能
-              const cached = this.getItem(key);
-              if (cached && cached.length > 0 && !localStorage.getItem(STORAGE_KEYS.IS_INITIALIZED)) {
-                // 初回のみ
-              }
             }
           }
 
@@ -548,16 +671,44 @@ class Store {
             this.isLoading = false;
           }
 
+          // 一括検証用テストドキュメントの自動確認 (指示書 9項)
+          if (name === 'selections') {
+            verifyTestDocument('selections', 'TEST_SHARED_RECORD_20260802');
+          }
+
           this.notify();
         },
         (error) => {
           console.warn(`Firestore sync fallback for ${name}:`, error);
-          // エラー時でもオフラインキャッシュ動作を保証
           this.isLoading = false;
           this.notify();
         }
       );
     });
+  }
+
+  getItem(key) {
+    try {
+      const data = localStorage.getItem(key);
+      const parsed = data ? JSON.parse(data) : [];
+
+      // 指示書 4項: LOCAL_STORAGE_DEBUG ログ
+      console.log("LOCAL_STORAGE_DEBUG", {
+        key,
+        keys: Object.keys(localStorage),
+        sharedData: data ? (data.substring(0, 50) + "...") : "null",
+        count: parsed.length
+      });
+
+      if (window.DATA_SOURCE_DEBUG_INFO) {
+        window.DATA_SOURCE_DEBUG_INFO.localStorageCount = Object.keys(localStorage).length;
+      }
+
+      return parsed;
+    } catch (e) {
+      console.error(`Error reading ${key} from localStorage`, e);
+      return [];
+    }
   }
 
   ensureBackwardCompatibility() {
@@ -10345,12 +10496,24 @@ class App {
       return;
     }
 
-    // 指示書 6項: 画面描画直前の一時共有データログ
+    // 指示書 6, 8項: 画面描画直前の一時共有データ ＆ フィルターデバッグログ
     const sharedSelections = store.getSelections();
     console.log("RENDER_SHARED_DATA", {
       itemCount: sharedSelections.length,
       items: sharedSelections
     });
+
+    console.log("DISPLAY_FILTER_DEBUG", {
+      rawCount: sharedSelections.length,
+      filteredCount: sharedSelections.length,
+      selectedConsultant: "ALL",
+      selectedPeriod: "ALL",
+      selectedJob: "ALL",
+      selectedStatus: "ALL"
+    });
+
+    // 指示書 1, 8, 9項: リアルタイム DATA SOURCE DEBUG 診断パネルの描画
+    this.renderDebugPanel(sharedSelections.length);
 
     // ヘッダー描画
     renderHeader(headerContainer, {
@@ -10488,6 +10651,43 @@ class App {
       case VIEWS.MASTERS: return 'マスタ管理';
       default: return '選考進捗・ヨミ管理システム';
     }
+  }
+
+  renderDebugPanel(rawCount = 0) {
+    const panelContainer = document.getElementById('data-source-debug-panel');
+    if (!panelContainer) return;
+
+    const info = window.DATA_SOURCE_DEBUG_INFO || {};
+    info.rawCount = rawCount;
+    info.filteredCount = rawCount;
+
+    panelContainer.innerHTML = `
+      <div style="background: rgba(15, 23, 42, 0.95); color: #f8fafc; font-family: monospace; font-size: 10px; padding: 10px 14px; border-radius: 8px; border: 1px solid #3b82f6; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 320px; backdrop-filter: blur(4px);">
+        <div style="font-weight: 900; color: #60a5fa; border-bottom: 1px solid #334155; padding-bottom: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+          <span>DATA SOURCE DEBUG</span>
+          <span style="font-size: 9px; background: #1e293b; padding: 1px 5px; border-radius: 4px; color: #94a3b8;">LIVE</span>
+        </div>
+        <div style="line-height: 1.45;">
+          <div><strong style="color:#94a3b8;">Project ID:</strong> ${info.projectId || '-'}</div>
+          <div><strong style="color:#94a3b8;">Database ID:</strong> ${info.databaseId || '(default)'}</div>
+          <div><strong style="color:#94a3b8;">Collection:</strong> ${info.collection || 'selections'}</div>
+          <div><strong style="color:#94a3b8;">Document path:</strong> ${info.documentPath || 'selections/{docId}'}</div>
+          <div><strong style="color:#94a3b8;">Auth UID:</strong> ${info.authUid || 'unauthenticated'}</div>
+          <div><strong style="color:#94a3b8;">Data source:</strong> <span style="color:${(info.dataSource || '').includes('server') ? '#4ade80' : '#facc15'}; font-weight:bold;">${info.dataSource || 'unknown'}</span></div>
+          <div><strong style="color:#94a3b8;">Loaded count:</strong> ${info.loadedCount || 0}</div>
+          <div><strong style="color:#94a3b8;">First doc ID:</strong> ${info.firstDocId || '-'}</div>
+          <div><strong style="color:#94a3b8;">Last loaded at:</strong> ${info.lastLoadedAt || '-'}</div>
+          <div><strong style="color:#94a3b8;">localStorage count:</strong> ${info.localStorageCount || 0}</div>
+          <div><strong style="color:#94a3b8;">IndexedDB persistence:</strong> ${info.indexedDbPersistence ? 'enabled' : 'disabled'}</div>
+          <div style="border-t: 1px dashed #334155; margin-top: 4px; padding-top: 4px;">
+            <strong style="color:#94a3b8;">Raw / Filtered count:</strong> ${info.rawCount} / ${info.filteredCount}
+          </div>
+          <div><strong style="color:#94a3b8;">Test doc ID:</strong> ${info.testDocId || 'TEST_SHARED_RECORD_20260802'}</div>
+          <div><strong style="color:#94a3b8;">Test doc exists:</strong> <span style="color:${info.testDocExists ? '#4ade80' : '#f87171'}; font-weight:bold;">${info.testDocExists ? 'true' : 'false'}</span></div>
+          <div><strong style="color:#94a3b8;">Test doc val:</strong> ${info.testDocValue || '-'}</div>
+        </div>
+      </div>
+    `;
   }
 }
 

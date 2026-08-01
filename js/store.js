@@ -75,17 +75,18 @@ class Store {
       subscribeCollection(
         name,
         (items) => {
+          // 指示書 7項: SHARED_DATA_STATE_UPDATED ログ (Firestore からの更新)
+          console.log("SHARED_DATA_STATE_UPDATED", {
+            source: "Firestore",
+            collectionName: name,
+            count: items ? items.length : 0,
+            data: items
+          });
+
           // 指示書 7項: Firestore から取得した正本データでローカル状態およびキャッシュを更新
           if (items && Array.isArray(items)) {
-            // Firestore 内にデータが存在する場合はローカルキャッシュへ保存
             if (items.length > 0) {
               localStorage.setItem(key, JSON.stringify(items));
-            } else {
-              // 初回などで Firestore が空の場合のみ、ローカル初期データが存在すれば初期投入可能
-              const cached = this.getItem(key);
-              if (cached && cached.length > 0 && !localStorage.getItem(STORAGE_KEYS.IS_INITIALIZED)) {
-                // 初回のみ
-              }
             }
           }
 
@@ -96,16 +97,44 @@ class Store {
             this.isLoading = false;
           }
 
+          // 一括検証用テストドキュメントの自動確認 (指示書 9項)
+          if (name === 'selections') {
+            verifyTestDocument('selections', 'TEST_SHARED_RECORD_20260802');
+          }
+
           this.notify();
         },
         (error) => {
           console.warn(`Firestore sync fallback for ${name}:`, error);
-          // エラー時でもオフラインキャッシュ動作を保証
           this.isLoading = false;
           this.notify();
         }
       );
     });
+  }
+
+  getItem(key) {
+    try {
+      const data = localStorage.getItem(key);
+      const parsed = data ? JSON.parse(data) : [];
+
+      // 指示書 4項: LOCAL_STORAGE_DEBUG ログ
+      console.log("LOCAL_STORAGE_DEBUG", {
+        key,
+        keys: Object.keys(localStorage),
+        sharedData: data ? (data.substring(0, 50) + "...") : "null",
+        count: parsed.length
+      });
+
+      if (window.DATA_SOURCE_DEBUG_INFO) {
+        window.DATA_SOURCE_DEBUG_INFO.localStorageCount = Object.keys(localStorage).length;
+      }
+
+      return parsed;
+    } catch (e) {
+      console.error(`Error reading ${key} from localStorage`, e);
+      return [];
+    }
   }
 
   ensureBackwardCompatibility() {

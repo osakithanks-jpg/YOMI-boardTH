@@ -54,12 +54,24 @@ class App {
       return;
     }
 
-    // 指示書 6項: 画面描画直前の一時共有データログ
+    // 指示書 6, 8項: 画面描画直前の一時共有データ ＆ フィルターデバッグログ
     const sharedSelections = store.getSelections();
     console.log("RENDER_SHARED_DATA", {
       itemCount: sharedSelections.length,
       items: sharedSelections
     });
+
+    console.log("DISPLAY_FILTER_DEBUG", {
+      rawCount: sharedSelections.length,
+      filteredCount: sharedSelections.length,
+      selectedConsultant: "ALL",
+      selectedPeriod: "ALL",
+      selectedJob: "ALL",
+      selectedStatus: "ALL"
+    });
+
+    // 指示書 1, 8, 9項: リアルタイム DATA SOURCE DEBUG 診断パネルの描画
+    this.renderDebugPanel(sharedSelections.length);
 
     // ヘッダー描画
     renderHeader(headerContainer, {
@@ -197,6 +209,43 @@ class App {
       case VIEWS.MASTERS: return 'マスタ管理';
       default: return '選考進捗・ヨミ管理システム';
     }
+  }
+
+  renderDebugPanel(rawCount = 0) {
+    const panelContainer = document.getElementById('data-source-debug-panel');
+    if (!panelContainer) return;
+
+    const info = window.DATA_SOURCE_DEBUG_INFO || {};
+    info.rawCount = rawCount;
+    info.filteredCount = rawCount;
+
+    panelContainer.innerHTML = `
+      <div style="background: rgba(15, 23, 42, 0.95); color: #f8fafc; font-family: monospace; font-size: 10px; padding: 10px 14px; border-radius: 8px; border: 1px solid #3b82f6; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 320px; backdrop-filter: blur(4px);">
+        <div style="font-weight: 900; color: #60a5fa; border-bottom: 1px solid #334155; padding-bottom: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+          <span>DATA SOURCE DEBUG</span>
+          <span style="font-size: 9px; background: #1e293b; padding: 1px 5px; border-radius: 4px; color: #94a3b8;">LIVE</span>
+        </div>
+        <div style="line-height: 1.45;">
+          <div><strong style="color:#94a3b8;">Project ID:</strong> ${info.projectId || '-'}</div>
+          <div><strong style="color:#94a3b8;">Database ID:</strong> ${info.databaseId || '(default)'}</div>
+          <div><strong style="color:#94a3b8;">Collection:</strong> ${info.collection || 'selections'}</div>
+          <div><strong style="color:#94a3b8;">Document path:</strong> ${info.documentPath || 'selections/{docId}'}</div>
+          <div><strong style="color:#94a3b8;">Auth UID:</strong> ${info.authUid || 'unauthenticated'}</div>
+          <div><strong style="color:#94a3b8;">Data source:</strong> <span style="color:${(info.dataSource || '').includes('server') ? '#4ade80' : '#facc15'}; font-weight:bold;">${info.dataSource || 'unknown'}</span></div>
+          <div><strong style="color:#94a3b8;">Loaded count:</strong> ${info.loadedCount || 0}</div>
+          <div><strong style="color:#94a3b8;">First doc ID:</strong> ${info.firstDocId || '-'}</div>
+          <div><strong style="color:#94a3b8;">Last loaded at:</strong> ${info.lastLoadedAt || '-'}</div>
+          <div><strong style="color:#94a3b8;">localStorage count:</strong> ${info.localStorageCount || 0}</div>
+          <div><strong style="color:#94a3b8;">IndexedDB persistence:</strong> ${info.indexedDbPersistence ? 'enabled' : 'disabled'}</div>
+          <div style="border-t: 1px dashed #334155; margin-top: 4px; padding-top: 4px;">
+            <strong style="color:#94a3b8;">Raw / Filtered count:</strong> ${info.rawCount} / ${info.filteredCount}
+          </div>
+          <div><strong style="color:#94a3b8;">Test doc ID:</strong> ${info.testDocId || 'TEST_SHARED_RECORD_20260802'}</div>
+          <div><strong style="color:#94a3b8;">Test doc exists:</strong> <span style="color:${info.testDocExists ? '#4ade80' : '#f87171'}; font-weight:bold;">${info.testDocExists ? 'true' : 'false'}</span></div>
+          <div><strong style="color:#94a3b8;">Test doc val:</strong> ${info.testDocValue || '-'}</div>
+        </div>
+      </div>
+    `;
   }
 }
 
