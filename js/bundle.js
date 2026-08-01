@@ -1,6 +1,4 @@
-/**
- * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・正本モジュール
- */
+
 
 const getFirebaseConfig = () => {
   if (typeof window !== 'undefined' && window.FIREBASE_CONFIG) {
@@ -58,14 +56,7 @@ function initFirebase() {
       }
       db = firebase.firestore();
 
-      try {
-        db.enablePersistence({ synchronizeTabs: true }).then(() => {
-          if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.indexedDbPersistence = true;
-        }).catch(() => {
-          if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.indexedDbPersistence = false;
-        });
-      } catch (pe) {}
-
+      // オフラインキャッシュによるブロッキングを防ぐため、常にリアルタイムオンライン接続に固定
       isFirebaseInitialized = true;
     } else {
       console.warn("Firebase SDK is not loaded. Operating in offline/fallback mode.");
@@ -256,6 +247,55 @@ async function migrateLocalDataToFirestore(dataPackage, onProgress) {
   }
 
   console.log("FIRESTORE_DATA_MIGRATION_SUCCESS", results);
+  return results;
+}
+
+/**
+ * 指示書 5項準拠: 端末内データの有無に関わらず、すべての標準共通データを Firestore へ一括投入（シード）
+ */
+async function seedAllInitialDataToFirestore(onProgress) {
+  const firestore = initFirebase();
+  if (!firestore) throw new Error("Firestore SDK is not loaded");
+
+  const cleanObject = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    return JSON.parse(JSON.stringify(obj, (key, value) => value === undefined ? null : value));
+  };
+
+  const seedPackage = [
+    { collection: 'selections', items: INITIAL_SELECTIONS, idField: 'selectionId' },
+    { collection: 'companies', items: INITIAL_COMPANIES, idField: 'companyId' },
+    { collection: 'jobs', items: INITIAL_JOBS, idField: 'jobId' },
+    { collection: 'candidates', items: INITIAL_CANDIDATES, idField: 'candidateId' },
+    { collection: 'consultants', items: INITIAL_CONSULTANTS, idField: 'consultantId' },
+    { collection: 'qTargets', items: INITIAL_Q_TARGETS, idField: 'targetId' }
+  ];
+
+  let totalCount = 0;
+  seedPackage.forEach(pkg => totalCount += pkg.items.length);
+
+  let current = 0;
+  const results = {};
+
+  for (const pkg of seedPackage) {
+    results[pkg.collection] = 0;
+    for (const item of pkg.items) {
+      current++;
+      if (onProgress) onProgress(current, totalCount, pkg.collection);
+
+      const docId = String(item[pkg.idField] || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
+      const cleanData = cleanObject(item);
+      
+      try {
+        await firestore.collection(pkg.collection).doc(docId).set(cleanData, { merge: true });
+        results[pkg.collection]++;
+      } catch (err) {
+        console.warn(`Seed item failed for ${pkg.collection}/${docId}:`, err);
+      }
+    }
+  }
+
+  console.log("FIRESTORE_SEED_ALL_SUCCESS", results);
   return results;
 }
 
@@ -10786,9 +10826,12 @@ class App {
       const bar = document.createElement('div');
       bar.className = 'mb-4 p-3 bg-slate-900 text-white rounded-lg shadow border border-indigo-500/30 flex flex-wrap items-center justify-between gap-2 text-xs font-mono';
       bar.innerHTML = `
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-2">
+          <button id="btn-seed-to-firestore" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
+            <span>🌱 共通データをFirestoreに一括初期投入</span>
+          </button>
           <button id="btn-migrate-to-firestore" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
-            <span>🚀 この端末のデータをFirestoreへ移行</span>
+            <span>🚀 端末内データをFirestoreへ移行</span>
           </button>
           <button id="btn-force-server-reload" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
             <span>⚡ Firestoreサーバーから再読込</span>
@@ -10803,6 +10846,29 @@ class App {
           ` : '※ Firestore サーバーが唯一の正本です'}
         </div>
       `;
+
+      // 🌱 一括初期シードボタンの処理
+      bar.querySelector('#btn-seed-to-firestore').addEventListener('click', async () => {
+        const btn = bar.querySelector('#btn-seed-to-firestore');
+        if (!confirm('標準の共通データ（全選考案件・企業・求人・候補者等）を Firestore サーバーへ直接一括投入しますか？')) return;
+
+        btn.disabled = true;
+        btn.innerText = '投入中...';
+
+        try {
+          const res = await seedAllInitialDataToFirestore((current, total, col) => {
+            btn.innerText = `投入中... (${current}/${total}件)`;
+          });
+
+          alert(`Firestore サーバーへの一括初期データ投入が完了しました！\n\n- 選考案件: ${res.selections || 0}件\n- 企業: ${res.companies || 0}件\n- 求人: ${res.jobs || 0}件\n- 候補者: ${res.candidates || 0}件\n\nプライベートモードまたは別端末でリロードして同じデータが表示されることを確認してください。`);
+          this.render();
+        } catch (err) {
+          alert('投入に失敗しました: ' + err.message);
+        } finally {
+          btn.disabled = false;
+          btn.innerText = '🌱 共通データをFirestoreに一括初期投入';
+        }
+      });
 
       // 指示書 5項: 一括データ移行ボタンの処理 (進捗表示・安全タイムアウト対応)
       bar.querySelector('#btn-migrate-to-firestore').addEventListener('click', async () => {

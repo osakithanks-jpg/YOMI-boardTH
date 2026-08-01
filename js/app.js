@@ -20,7 +20,7 @@ import { openNewSelectionModal } from './components/newSelectionModal.js';
 import { openCsvImportModal } from './components/csvImportModal.js';
 import { openEmailComposerModal } from './components/emailComposerModal.js';
 import { renderSyncDiagnosticView } from './components/syncDiagnosticView.js';
-import { fetchSelectionsFromServerDirect } from './firebase.js';
+import { fetchSelectionsFromServerDirect, migrateLocalDataToFirestore, seedAllInitialDataToFirestore } from './firebase.js';
 
 class App {
   constructor() {
@@ -105,9 +105,12 @@ class App {
       const bar = document.createElement('div');
       bar.className = 'mb-4 p-3 bg-slate-900 text-white rounded-lg shadow border border-indigo-500/30 flex flex-wrap items-center justify-between gap-2 text-xs font-mono';
       bar.innerHTML = `
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-2">
+          <button id="btn-seed-to-firestore" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
+            <span>🌱 共通データをFirestoreに一括初期投入</span>
+          </button>
           <button id="btn-migrate-to-firestore" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
-            <span>🚀 この端末のデータをFirestoreへ移行</span>
+            <span>🚀 端末内データをFirestoreへ移行</span>
           </button>
           <button id="btn-force-server-reload" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
             <span>⚡ Firestoreサーバーから再読込</span>
@@ -122,6 +125,29 @@ class App {
           ` : '※ Firestore サーバーが唯一の正本です'}
         </div>
       `;
+
+      // 🌱 一括初期シードボタンの処理
+      bar.querySelector('#btn-seed-to-firestore').addEventListener('click', async () => {
+        const btn = bar.querySelector('#btn-seed-to-firestore');
+        if (!confirm('標準の共通データ（全選考案件・企業・求人・候補者等）を Firestore サーバーへ直接一括投入しますか？')) return;
+
+        btn.disabled = true;
+        btn.innerText = '投入中...';
+
+        try {
+          const res = await seedAllInitialDataToFirestore((current, total, col) => {
+            btn.innerText = `投入中... (${current}/${total}件)`;
+          });
+
+          alert(`Firestore サーバーへの一括初期データ投入が完了しました！\n\n- 選考案件: ${res.selections || 0}件\n- 企業: ${res.companies || 0}件\n- 求人: ${res.jobs || 0}件\n- 候補者: ${res.candidates || 0}件\n\nプライベートモードまたは別端末でリロードして同じデータが表示されることを確認してください。`);
+          this.render();
+        } catch (err) {
+          alert('投入に失敗しました: ' + err.message);
+        } finally {
+          btn.disabled = false;
+          btn.innerText = '🌱 共通データをFirestoreに一括初期投入';
+        }
+      });
 
       // 指示書 5項: 一括データ移行ボタンの処理 (進捗表示・安全タイムアウト対応)
       bar.querySelector('#btn-migrate-to-firestore').addEventListener('click', async () => {

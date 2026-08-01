@@ -1,6 +1,14 @@
-/**
- * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・正本モジュール
- */
+import {
+  INITIAL_CONSULTANTS,
+  INITIAL_COMPANIES,
+  INITIAL_JOBS,
+  INITIAL_CANDIDATES,
+  INITIAL_SELECTIONS,
+  INITIAL_Q_TARGETS,
+  INITIAL_HISTORIES,
+  INITIAL_EMAIL_TEMPLATES,
+  INITIAL_COMPANY_COMMUNICATIONS
+} from './constants.js';
 
 const getFirebaseConfig = () => {
   if (typeof window !== 'undefined' && window.FIREBASE_CONFIG) {
@@ -58,14 +66,7 @@ export function initFirebase() {
       }
       db = firebase.firestore();
 
-      try {
-        db.enablePersistence({ synchronizeTabs: true }).then(() => {
-          if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.indexedDbPersistence = true;
-        }).catch(() => {
-          if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.indexedDbPersistence = false;
-        });
-      } catch (pe) {}
-
+      // オフラインキャッシュによるブロッキングを防ぐため、常にリアルタイムオンライン接続に固定
       isFirebaseInitialized = true;
     } else {
       console.warn("Firebase SDK is not loaded. Operating in offline/fallback mode.");
@@ -256,6 +257,55 @@ export async function migrateLocalDataToFirestore(dataPackage, onProgress) {
   }
 
   console.log("FIRESTORE_DATA_MIGRATION_SUCCESS", results);
+  return results;
+}
+
+/**
+ * 指示書 5項準拠: 端末内データの有無に関わらず、すべての標準共通データを Firestore へ一括投入（シード）
+ */
+export async function seedAllInitialDataToFirestore(onProgress) {
+  const firestore = initFirebase();
+  if (!firestore) throw new Error("Firestore SDK is not loaded");
+
+  const cleanObject = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    return JSON.parse(JSON.stringify(obj, (key, value) => value === undefined ? null : value));
+  };
+
+  const seedPackage = [
+    { collection: 'selections', items: INITIAL_SELECTIONS, idField: 'selectionId' },
+    { collection: 'companies', items: INITIAL_COMPANIES, idField: 'companyId' },
+    { collection: 'jobs', items: INITIAL_JOBS, idField: 'jobId' },
+    { collection: 'candidates', items: INITIAL_CANDIDATES, idField: 'candidateId' },
+    { collection: 'consultants', items: INITIAL_CONSULTANTS, idField: 'consultantId' },
+    { collection: 'qTargets', items: INITIAL_Q_TARGETS, idField: 'targetId' }
+  ];
+
+  let totalCount = 0;
+  seedPackage.forEach(pkg => totalCount += pkg.items.length);
+
+  let current = 0;
+  const results = {};
+
+  for (const pkg of seedPackage) {
+    results[pkg.collection] = 0;
+    for (const item of pkg.items) {
+      current++;
+      if (onProgress) onProgress(current, totalCount, pkg.collection);
+
+      const docId = String(item[pkg.idField] || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
+      const cleanData = cleanObject(item);
+      
+      try {
+        await firestore.collection(pkg.collection).doc(docId).set(cleanData, { merge: true });
+        results[pkg.collection]++;
+      } catch (err) {
+        console.warn(`Seed item failed for ${pkg.collection}/${docId}:`, err);
+      }
+    }
+  }
+
+  console.log("FIRESTORE_SEED_ALL_SUCCESS", results);
   return results;
 }
 
