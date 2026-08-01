@@ -1,5 +1,5 @@
 /**
- * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・診断モジュール
+ * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・正本モジュール
  */
 
 const getFirebaseConfig = () => {
@@ -78,7 +78,7 @@ export function initFirebase() {
 }
 
 /**
- * リアルタイムコレクション監視
+ * リアルタイムコレクション監視 (指示書 3, 7, 8項: サーバー優先)
  */
 export function subscribeCollection(collectionName, onUpdate, onError) {
   const firestore = initFirebase();
@@ -94,7 +94,7 @@ export function subscribeCollection(collectionName, onUpdate, onError) {
   });
 
   if (!firestore) {
-    if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.dataSource = "localStorage";
+    if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.dataSource = "unknown";
     if (onError) onError(new Error("Firestore is not available"));
     return () => {};
   }
@@ -157,7 +157,75 @@ export function subscribeCollection(collectionName, onUpdate, onError) {
 }
 
 /**
- * 指示書 2, 3, 5項: 強制切り分け用 syncDiagnostics/shared-test サーバー直接取得 ＆ 自動作成
+ * 指示書 3, 6, 8項: サーバーからの全データ強制取得 (getDocsFromServer 相当)
+ */
+export async function fetchCollectionFromServerDirect(collectionName) {
+  const firestore = initFirebase();
+  if (!firestore) return [];
+
+  try {
+    const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
+    const docs = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+    console.log("FIRESTORE_SERVER_DIRECT_FETCH", { collectionName, count: snapshot.size });
+    return docs;
+  } catch (e) {
+    console.warn(`Server direct fetch failed for ${collectionName}:`, e);
+    // フォールバック: キャッシュ経由でも試行
+    try {
+      const snap = await firestore.collection(collectionName).get();
+      return snap.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+    } catch (err2) {
+      return [];
+    }
+  }
+}
+
+/**
+ * 指示書 5項: 端末内データの Firestore サーバーへの一括移行関数
+ */
+export async function migrateLocalDataToFirestore(dataPackage) {
+  const firestore = initFirebase();
+  if (!firestore) {
+    throw new Error("Firestore SDK is not initialized");
+  }
+
+  const results = {
+    selections: 0,
+    companies: 0,
+    jobs: 0,
+    candidates: 0,
+    consultants: 0,
+    qTargets: 0,
+    histories: 0
+  };
+
+  const collectionsMap = [
+    { key: 'selections', collection: 'selections', idField: 'selectionId' },
+    { key: 'companies', collection: 'companies', idField: 'companyId' },
+    { key: 'jobs', collection: 'jobs', idField: 'jobId' },
+    { key: 'candidates', collection: 'candidates', idField: 'candidateId' },
+    { key: 'consultants', collection: 'consultants', idField: 'consultantId' },
+    { key: 'qTargets', collection: 'qTargets', idField: 'targetId' },
+    { key: 'histories', collection: 'histories', idField: 'historyId' }
+  ];
+
+  for (const item of collectionsMap) {
+    const list = dataPackage[item.key] || [];
+    if (Array.isArray(list) && list.length > 0) {
+      for (const docData of list) {
+        const docId = String(docData[item.idField] || docData.id || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
+        await firestore.collection(item.collection).doc(docId).set(docData, { merge: true });
+        results[item.key]++;
+      }
+    }
+  }
+
+  console.log("FIRESTORE_DATA_MIGRATION_SUCCESS", results);
+  return results;
+}
+
+/**
+ * 強制切り分け用 syncDiagnostics/shared-test サーバー直接取得 ＆ 自動作成
  */
 export async function fetchSyncDiagnosticFromServer() {
   const firestore = initFirebase();
@@ -175,7 +243,6 @@ export async function fetchSyncDiagnosticFromServer() {
   const docId = "shared-test";
   const docRef = firestore.collection(collectionName).doc(docId);
 
-  // 1. 初回作成またはデータ確定
   const initialPayload = {
     message: "COMMON DATA TEST 2026-08-02",
     testNumber: 8202,
@@ -184,12 +251,10 @@ export async function fetchSyncDiagnosticFromServer() {
   };
 
   try {
-    // まずサーバーからの直接取得を試みる
     let snapshot;
     try {
       snapshot = await docRef.get({ source: 'server' });
     } catch (serverErr) {
-      // ドキュメント未存在または初回読み込み失敗の場合に作成
       await docRef.set(initialPayload, { merge: true });
       snapshot = await docRef.get({ source: 'server' });
     }
@@ -230,14 +295,9 @@ export async function fetchSyncDiagnosticFromServer() {
   }
 }
 
-/**
- * 指示書 6項: 既存画面用「Firestoreサーバーから再読込」直接フェッチ関数
- */
 export async function fetchSelectionsFromServerDirect(collectionName = 'selections') {
   const firestore = initFirebase();
-  if (!firestore) {
-    return { success: false, error: 'Firestore is not initialized' };
-  }
+  if (!firestore) return { success: false, error: 'Firestore is not initialized' };
 
   try {
     const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
@@ -253,19 +313,14 @@ export async function fetchSelectionsFromServerDirect(collectionName = 'selectio
       items: docs
     };
 
-    console.log("FIRESTORE_DIRECT_SELECTIONS_FETCH", result);
     return result;
   } catch (error) {
-    console.error("FIRESTORE DIRECT SELECTIONS FETCH FAILED:", error);
-    return {
-      success: false,
-      error: error.message || String(error)
-    };
+    return { success: false, error: error.message || String(error) };
   }
 }
 
 /**
- * Firestore ドキュメント保存
+ * Firestore ドキュメント保存 (指示書 7項)
  */
 export async function saveDocument(collectionName, docId, payload) {
   const firestore = initFirebase();
@@ -273,12 +328,12 @@ export async function saveDocument(collectionName, docId, payload) {
   console.log("FIRESTORE_SAVE_START", { collectionName, payload });
 
   if (!firestore) {
-    console.warn("Firestore not initialized. Local cache only.");
+    console.warn("Firestore not initialized.");
     return false;
   }
 
   try {
-    const targetId = docId || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4));
+    const targetId = String(docId || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
     await firestore.collection(collectionName).doc(targetId).set(payload, { merge: true });
 
     console.log("FIRESTORE_SAVE_SUCCESS", { collectionName, documentId: targetId });
@@ -298,7 +353,8 @@ export async function deleteDocument(collectionName, docId) {
   if (!firestore || !docId) return false;
 
   try {
-    await firestore.collection(collectionName).doc(docId).delete();
+    await firestore.collection(collectionName).doc(String(docId)).delete();
+    console.log("FIRESTORE_DELETE_SUCCESS", { collectionName, docId });
     return true;
   } catch (error) {
     console.error("FIRESTORE_DELETE_ERROR", { collectionName, docId, code: error.code, message: error.message });

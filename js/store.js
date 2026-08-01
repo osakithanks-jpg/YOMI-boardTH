@@ -40,72 +40,65 @@ const STORAGE_KEYS = {
 class Store {
   constructor() {
     this.listeners = [];
-    this.isLoading = true; // 指示書 9項: ローディング状態制御
+    this.isLoading = true; // 指示書 1項: ローディング状態制御
     this.firestoreSyncedCollections = new Set();
-    this.initData();
+    
+    // 指示書 2, 3項: 業務データの唯一の正本はメモリ state (this.data)
+    this.data = {
+      selections: [],
+      companies: [],
+      jobs: [],
+      candidates: [],
+      consultants: INITIAL_CONSULTANTS,
+      qTargets: [],
+      histories: [],
+      companyCommunications: []
+    };
+
     this.initFirestoreSync();
   }
 
-  initData() {
-    // ローカルキャッシュの読み込み (Firestore受信前の一時表示用)
-    if (!localStorage.getItem(STORAGE_KEYS.CONSULTANTS)) {
-      localStorage.setItem(STORAGE_KEYS.CONSULTANTS, JSON.stringify(INITIAL_CONSULTANTS));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.CURRENT_CONSULTANT)) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_CONSULTANT, JSON.stringify(INITIAL_CONSULTANTS[0]));
-    }
-  }
-
   initFirestoreSync() {
-    // 指示書 7, 8項: 共通データの正本は Firestore。各コレクションのリアルタイム監視を開始。
+    // 指示書 3, 7項: Firestore サーバーからの監視と反映
     const collectionsToSync = [
-      { name: 'selections', key: STORAGE_KEYS.SELECTIONS },
-      { name: 'companies', key: STORAGE_KEYS.COMPANIES },
-      { name: 'jobs', key: STORAGE_KEYS.JOBS },
-      { name: 'candidates', key: STORAGE_KEYS.CANDIDATES },
-      { name: 'consultants', key: STORAGE_KEYS.CONSULTANTS },
-      { name: 'qTargets', key: STORAGE_KEYS.Q_TARGETS },
-      { name: 'histories', key: STORAGE_KEYS.HISTORIES },
-      { name: 'companyCommunications', key: STORAGE_KEYS.COMPANY_COMMUNICATIONS }
+      { name: 'selections', field: 'selections' },
+      { name: 'companies', field: 'companies' },
+      { name: 'jobs', field: 'jobs' },
+      { name: 'candidates', field: 'candidates' },
+      { name: 'consultants', field: 'consultants' },
+      { name: 'qTargets', field: 'qTargets' },
+      { name: 'histories', field: 'histories' },
+      { name: 'companyCommunications', field: 'companyCommunications' }
     ];
 
-    let loadedCount = 0;
-
-    collectionsToSync.forEach(({ name, key }) => {
+    collectionsToSync.forEach(({ name, field }) => {
       subscribeCollection(
         name,
         (items) => {
-          // 指示書 7項: SHARED_DATA_STATE_UPDATED ログ (Firestore からの更新)
+          const validItems = Array.isArray(items) ? items : [];
+
+          // 指示書 7項: SHARED_DATA_STATE_UPDATED ログ (Firestore 正本からの直接反映)
           console.log("SHARED_DATA_STATE_UPDATED", {
             source: "Firestore",
             collectionName: name,
-            count: items ? items.length : 0,
-            data: items
+            count: validItems.length,
+            data: validItems
           });
 
-          // 指示書 7項: Firestore から取得した正本データでローカル状態およびキャッシュを更新
-          if (items && Array.isArray(items)) {
-            if (items.length > 0) {
-              localStorage.setItem(key, JSON.stringify(items));
-            }
-          }
+          // 指示書 2, 3項: localStorage やキャッシュは使用せず、state にそのまま反映
+          this.data[field] = validItems;
 
           this.firestoreSyncedCollections.add(name);
           
-          // 全主要コレクションの監視・初回データ受信が完了したらローディング解除 (指示書 9項)
+          // 初回データ受信が完了したらローディング解除 (指示書 1, 6項)
           if (this.firestoreSyncedCollections.size >= 4) {
             this.isLoading = false;
-          }
-
-          // 一括検証用テストドキュメントの自動確認 (指示書 9項)
-          if (name === 'selections') {
-            verifyTestDocument('selections', 'TEST_SHARED_RECORD_20260802');
           }
 
           this.notify();
         },
         (error) => {
-          console.warn(`Firestore sync fallback for ${name}:`, error);
+          console.warn(`Firestore sync error for ${name}:`, error);
           this.isLoading = false;
           this.notify();
         }
@@ -114,25 +107,29 @@ class Store {
   }
 
   getItem(key) {
+    // 指示書 2項: 業務データの表示元・正本として localStorage を使用することを完全禁止
+    const keyToDataField = {
+      [STORAGE_KEYS.SELECTIONS]: 'selections',
+      [STORAGE_KEYS.COMPANIES]: 'companies',
+      [STORAGE_KEYS.JOBS]: 'jobs',
+      [STORAGE_KEYS.CANDIDATES]: 'candidates',
+      [STORAGE_KEYS.CONSULTANTS]: 'consultants',
+      [STORAGE_KEYS.Q_TARGETS]: 'qTargets',
+      [STORAGE_KEYS.HISTORIES]: 'histories',
+      [STORAGE_KEYS.COMPANY_COMMUNICATIONS]: 'companyCommunications'
+    };
+
+    const dataField = keyToDataField[key];
+    if (dataField) {
+      // 業務データはメモリ state (this.data) からのみ返却
+      return this.data[dataField] || [];
+    }
+
+    // UI設定（現在選択コンサルタント・ロール設定など）のみ localStorage から取得可
     try {
       const data = localStorage.getItem(key);
-      const parsed = data ? JSON.parse(data) : [];
-
-      // 指示書 4項: LOCAL_STORAGE_DEBUG ログ
-      console.log("LOCAL_STORAGE_DEBUG", {
-        key,
-        keys: Object.keys(localStorage),
-        sharedData: data ? (data.substring(0, 50) + "...") : "null",
-        count: parsed.length
-      });
-
-      if (window.DATA_SOURCE_DEBUG_INFO) {
-        window.DATA_SOURCE_DEBUG_INFO.localStorageCount = Object.keys(localStorage).length;
-      }
-
-      return parsed;
+      return data ? JSON.parse(data) : [];
     } catch (e) {
-      console.error(`Error reading ${key} from localStorage`, e);
       return [];
     }
   }

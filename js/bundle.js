@@ -1,5 +1,5 @@
 /**
- * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・診断モジュール
+ * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・正本モジュール
  */
 
 const getFirebaseConfig = () => {
@@ -78,7 +78,7 @@ function initFirebase() {
 }
 
 /**
- * リアルタイムコレクション監視
+ * リアルタイムコレクション監視 (指示書 3, 7, 8項: サーバー優先)
  */
 function subscribeCollection(collectionName, onUpdate, onError) {
   const firestore = initFirebase();
@@ -94,7 +94,7 @@ function subscribeCollection(collectionName, onUpdate, onError) {
   });
 
   if (!firestore) {
-    if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.dataSource = "localStorage";
+    if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.dataSource = "unknown";
     if (onError) onError(new Error("Firestore is not available"));
     return () => {};
   }
@@ -157,7 +157,75 @@ function subscribeCollection(collectionName, onUpdate, onError) {
 }
 
 /**
- * 指示書 2, 3, 5項: 強制切り分け用 syncDiagnostics/shared-test サーバー直接取得 ＆ 自動作成
+ * 指示書 3, 6, 8項: サーバーからの全データ強制取得 (getDocsFromServer 相当)
+ */
+async function fetchCollectionFromServerDirect(collectionName) {
+  const firestore = initFirebase();
+  if (!firestore) return [];
+
+  try {
+    const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
+    const docs = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+    console.log("FIRESTORE_SERVER_DIRECT_FETCH", { collectionName, count: snapshot.size });
+    return docs;
+  } catch (e) {
+    console.warn(`Server direct fetch failed for ${collectionName}:`, e);
+    // フォールバック: キャッシュ経由でも試行
+    try {
+      const snap = await firestore.collection(collectionName).get();
+      return snap.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
+    } catch (err2) {
+      return [];
+    }
+  }
+}
+
+/**
+ * 指示書 5項: 端末内データの Firestore サーバーへの一括移行関数
+ */
+async function migrateLocalDataToFirestore(dataPackage) {
+  const firestore = initFirebase();
+  if (!firestore) {
+    throw new Error("Firestore SDK is not initialized");
+  }
+
+  const results = {
+    selections: 0,
+    companies: 0,
+    jobs: 0,
+    candidates: 0,
+    consultants: 0,
+    qTargets: 0,
+    histories: 0
+  };
+
+  const collectionsMap = [
+    { key: 'selections', collection: 'selections', idField: 'selectionId' },
+    { key: 'companies', collection: 'companies', idField: 'companyId' },
+    { key: 'jobs', collection: 'jobs', idField: 'jobId' },
+    { key: 'candidates', collection: 'candidates', idField: 'candidateId' },
+    { key: 'consultants', collection: 'consultants', idField: 'consultantId' },
+    { key: 'qTargets', collection: 'qTargets', idField: 'targetId' },
+    { key: 'histories', collection: 'histories', idField: 'historyId' }
+  ];
+
+  for (const item of collectionsMap) {
+    const list = dataPackage[item.key] || [];
+    if (Array.isArray(list) && list.length > 0) {
+      for (const docData of list) {
+        const docId = String(docData[item.idField] || docData.id || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
+        await firestore.collection(item.collection).doc(docId).set(docData, { merge: true });
+        results[item.key]++;
+      }
+    }
+  }
+
+  console.log("FIRESTORE_DATA_MIGRATION_SUCCESS", results);
+  return results;
+}
+
+/**
+ * 強制切り分け用 syncDiagnostics/shared-test サーバー直接取得 ＆ 自動作成
  */
 async function fetchSyncDiagnosticFromServer() {
   const firestore = initFirebase();
@@ -175,7 +243,6 @@ async function fetchSyncDiagnosticFromServer() {
   const docId = "shared-test";
   const docRef = firestore.collection(collectionName).doc(docId);
 
-  // 1. 初回作成またはデータ確定
   const initialPayload = {
     message: "COMMON DATA TEST 2026-08-02",
     testNumber: 8202,
@@ -184,12 +251,10 @@ async function fetchSyncDiagnosticFromServer() {
   };
 
   try {
-    // まずサーバーからの直接取得を試みる
     let snapshot;
     try {
       snapshot = await docRef.get({ source: 'server' });
     } catch (serverErr) {
-      // ドキュメント未存在または初回読み込み失敗の場合に作成
       await docRef.set(initialPayload, { merge: true });
       snapshot = await docRef.get({ source: 'server' });
     }
@@ -230,14 +295,9 @@ async function fetchSyncDiagnosticFromServer() {
   }
 }
 
-/**
- * 指示書 6項: 既存画面用「Firestoreサーバーから再読込」直接フェッチ関数
- */
 async function fetchSelectionsFromServerDirect(collectionName = 'selections') {
   const firestore = initFirebase();
-  if (!firestore) {
-    return { success: false, error: 'Firestore is not initialized' };
-  }
+  if (!firestore) return { success: false, error: 'Firestore is not initialized' };
 
   try {
     const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
@@ -253,19 +313,14 @@ async function fetchSelectionsFromServerDirect(collectionName = 'selections') {
       items: docs
     };
 
-    console.log("FIRESTORE_DIRECT_SELECTIONS_FETCH", result);
     return result;
   } catch (error) {
-    console.error("FIRESTORE DIRECT SELECTIONS FETCH FAILED:", error);
-    return {
-      success: false,
-      error: error.message || String(error)
-    };
+    return { success: false, error: error.message || String(error) };
   }
 }
 
 /**
- * Firestore ドキュメント保存
+ * Firestore ドキュメント保存 (指示書 7項)
  */
 async function saveDocument(collectionName, docId, payload) {
   const firestore = initFirebase();
@@ -273,12 +328,12 @@ async function saveDocument(collectionName, docId, payload) {
   console.log("FIRESTORE_SAVE_START", { collectionName, payload });
 
   if (!firestore) {
-    console.warn("Firestore not initialized. Local cache only.");
+    console.warn("Firestore not initialized.");
     return false;
   }
 
   try {
-    const targetId = docId || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4));
+    const targetId = String(docId || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
     await firestore.collection(collectionName).doc(targetId).set(payload, { merge: true });
 
     console.log("FIRESTORE_SAVE_SUCCESS", { collectionName, documentId: targetId });
@@ -298,7 +353,8 @@ async function deleteDocument(collectionName, docId) {
   if (!firestore || !docId) return false;
 
   try {
-    await firestore.collection(collectionName).doc(docId).delete();
+    await firestore.collection(collectionName).doc(String(docId)).delete();
+    console.log("FIRESTORE_DELETE_SUCCESS", { collectionName, docId });
     return true;
   } catch (error) {
     console.error("FIRESTORE_DELETE_ERROR", { collectionName, docId, code: error.code, message: error.message });
@@ -627,72 +683,65 @@ const STORAGE_KEYS = {
 class Store {
   constructor() {
     this.listeners = [];
-    this.isLoading = true; // 指示書 9項: ローディング状態制御
+    this.isLoading = true; // 指示書 1項: ローディング状態制御
     this.firestoreSyncedCollections = new Set();
-    this.initData();
+    
+    // 指示書 2, 3項: 業務データの唯一の正本はメモリ state (this.data)
+    this.data = {
+      selections: [],
+      companies: [],
+      jobs: [],
+      candidates: [],
+      consultants: INITIAL_CONSULTANTS,
+      qTargets: [],
+      histories: [],
+      companyCommunications: []
+    };
+
     this.initFirestoreSync();
   }
 
-  initData() {
-    // ローカルキャッシュの読み込み (Firestore受信前の一時表示用)
-    if (!localStorage.getItem(STORAGE_KEYS.CONSULTANTS)) {
-      localStorage.setItem(STORAGE_KEYS.CONSULTANTS, JSON.stringify(INITIAL_CONSULTANTS));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.CURRENT_CONSULTANT)) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_CONSULTANT, JSON.stringify(INITIAL_CONSULTANTS[0]));
-    }
-  }
-
   initFirestoreSync() {
-    // 指示書 7, 8項: 共通データの正本は Firestore。各コレクションのリアルタイム監視を開始。
+    // 指示書 3, 7項: Firestore サーバーからの監視と反映
     const collectionsToSync = [
-      { name: 'selections', key: STORAGE_KEYS.SELECTIONS },
-      { name: 'companies', key: STORAGE_KEYS.COMPANIES },
-      { name: 'jobs', key: STORAGE_KEYS.JOBS },
-      { name: 'candidates', key: STORAGE_KEYS.CANDIDATES },
-      { name: 'consultants', key: STORAGE_KEYS.CONSULTANTS },
-      { name: 'qTargets', key: STORAGE_KEYS.Q_TARGETS },
-      { name: 'histories', key: STORAGE_KEYS.HISTORIES },
-      { name: 'companyCommunications', key: STORAGE_KEYS.COMPANY_COMMUNICATIONS }
+      { name: 'selections', field: 'selections' },
+      { name: 'companies', field: 'companies' },
+      { name: 'jobs', field: 'jobs' },
+      { name: 'candidates', field: 'candidates' },
+      { name: 'consultants', field: 'consultants' },
+      { name: 'qTargets', field: 'qTargets' },
+      { name: 'histories', field: 'histories' },
+      { name: 'companyCommunications', field: 'companyCommunications' }
     ];
 
-    let loadedCount = 0;
-
-    collectionsToSync.forEach(({ name, key }) => {
+    collectionsToSync.forEach(({ name, field }) => {
       subscribeCollection(
         name,
         (items) => {
-          // 指示書 7項: SHARED_DATA_STATE_UPDATED ログ (Firestore からの更新)
+          const validItems = Array.isArray(items) ? items : [];
+
+          // 指示書 7項: SHARED_DATA_STATE_UPDATED ログ (Firestore 正本からの直接反映)
           console.log("SHARED_DATA_STATE_UPDATED", {
             source: "Firestore",
             collectionName: name,
-            count: items ? items.length : 0,
-            data: items
+            count: validItems.length,
+            data: validItems
           });
 
-          // 指示書 7項: Firestore から取得した正本データでローカル状態およびキャッシュを更新
-          if (items && Array.isArray(items)) {
-            if (items.length > 0) {
-              localStorage.setItem(key, JSON.stringify(items));
-            }
-          }
+          // 指示書 2, 3項: localStorage やキャッシュは使用せず、state にそのまま反映
+          this.data[field] = validItems;
 
           this.firestoreSyncedCollections.add(name);
           
-          // 全主要コレクションの監視・初回データ受信が完了したらローディング解除 (指示書 9項)
+          // 初回データ受信が完了したらローディング解除 (指示書 1, 6項)
           if (this.firestoreSyncedCollections.size >= 4) {
             this.isLoading = false;
-          }
-
-          // 一括検証用テストドキュメントの自動確認 (指示書 9項)
-          if (name === 'selections') {
-            verifyTestDocument('selections', 'TEST_SHARED_RECORD_20260802');
           }
 
           this.notify();
         },
         (error) => {
-          console.warn(`Firestore sync fallback for ${name}:`, error);
+          console.warn(`Firestore sync error for ${name}:`, error);
           this.isLoading = false;
           this.notify();
         }
@@ -701,25 +750,29 @@ class Store {
   }
 
   getItem(key) {
+    // 指示書 2項: 業務データの表示元・正本として localStorage を使用することを完全禁止
+    const keyToDataField = {
+      [STORAGE_KEYS.SELECTIONS]: 'selections',
+      [STORAGE_KEYS.COMPANIES]: 'companies',
+      [STORAGE_KEYS.JOBS]: 'jobs',
+      [STORAGE_KEYS.CANDIDATES]: 'candidates',
+      [STORAGE_KEYS.CONSULTANTS]: 'consultants',
+      [STORAGE_KEYS.Q_TARGETS]: 'qTargets',
+      [STORAGE_KEYS.HISTORIES]: 'histories',
+      [STORAGE_KEYS.COMPANY_COMMUNICATIONS]: 'companyCommunications'
+    };
+
+    const dataField = keyToDataField[key];
+    if (dataField) {
+      // 業務データはメモリ state (this.data) からのみ返却
+      return this.data[dataField] || [];
+    }
+
+    // UI設定（現在選択コンサルタント・ロール設定など）のみ localStorage から取得可
     try {
       const data = localStorage.getItem(key);
-      const parsed = data ? JSON.parse(data) : [];
-
-      // 指示書 4項: LOCAL_STORAGE_DEBUG ログ
-      console.log("LOCAL_STORAGE_DEBUG", {
-        key,
-        keys: Object.keys(localStorage),
-        sharedData: data ? (data.substring(0, 50) + "...") : "null",
-        count: parsed.length
-      });
-
-      if (window.DATA_SOURCE_DEBUG_INFO) {
-        window.DATA_SOURCE_DEBUG_INFO.localStorageCount = Object.keys(localStorage).length;
-      }
-
-      return parsed;
+      return data ? JSON.parse(data) : [];
     } catch (e) {
-      console.error(`Error reading ${key} from localStorage`, e);
       return [];
     }
   }
@@ -10693,12 +10746,15 @@ class App {
     // メインコンテンツ描画
     contentContainer.innerHTML = '';
 
-    // 指示書 6項: 既存画面用「Firestoreサーバーから再読込」一時バー
+    // 指示書 5, 6項: 一時操作バー ＆ データ移行ボタン
     if (this.currentView !== 'syncDiagnostic') {
       const bar = document.createElement('div');
       bar.className = 'mb-4 p-3 bg-slate-900 text-white rounded-lg shadow border border-indigo-500/30 flex flex-wrap items-center justify-between gap-2 text-xs font-mono';
       bar.innerHTML = `
         <div class="flex items-center space-x-3">
+          <button id="btn-migrate-to-firestore" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
+            <span>🚀 この端末のデータをFirestoreへ移行</span>
+          </button>
           <button id="btn-force-server-reload" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
             <span>⚡ Firestoreサーバーから再読込</span>
           </button>
@@ -10708,12 +10764,41 @@ class App {
           ${this.directFetchResult ? `
             <span class="text-emerald-400 font-bold">取得元: ${this.directFetchResult.loadedFrom}</span> | 
             <span>件数: <strong>${this.directFetchResult.count}</strong></span> | 
-            <span>先頭ID: <code class="bg-slate-800 px-1 rounded text-blue-300">${this.directFetchResult.firstDocId}</code></span> | 
-            <span>最終ID: <code class="bg-slate-800 px-1 rounded text-blue-300">${this.directFetchResult.lastDocId}</code></span> | 
             <span>取得時刻: ${this.directFetchResult.loadedAt}</span>
-          ` : '※ キャッシュを使用せず Firestore サーバーから対象データを直接取得します'}
+          ` : '※ Firestore サーバーが唯一の正本です'}
         </div>
       `;
+
+      // 指示書 5項: 一括データ移行ボタンの処理
+      bar.querySelector('#btn-migrate-to-firestore').addEventListener('click', async () => {
+        const btn = bar.querySelector('#btn-migrate-to-firestore');
+        if (!confirm('この端末（localStorage）にある既存データを Firestore サーバーへ一括移行しますか？')) return;
+
+        btn.disabled = true;
+        btn.innerText = '移行中...';
+
+        try {
+          // localStorage 内の全キーのデータを収集
+          const dataPackage = {
+            selections: JSON.parse(localStorage.getItem('selection_app_selections') || '[]'),
+            companies: JSON.parse(localStorage.getItem('selection_app_companies') || '[]'),
+            jobs: JSON.parse(localStorage.getItem('selection_app_jobs') || '[]'),
+            candidates: JSON.parse(localStorage.getItem('selection_app_candidates') || '[]'),
+            consultants: JSON.parse(localStorage.getItem('selection_app_consultants') || '[]'),
+            qTargets: JSON.parse(localStorage.getItem('selection_app_q_targets') || '[]'),
+            histories: JSON.parse(localStorage.getItem('selection_app_histories') || '[]')
+          };
+
+          const res = await migrateLocalDataToFirestore(dataPackage);
+          alert(`Firestore へのデータ移行が完了しました！\n\n- 選考案件: ${res.selections}件\n- 企業: ${res.companies}件\n- 求人: ${res.jobs}件\n- 候補者: ${res.candidates}件\n- コンサルタント: ${res.consultants}件\n\nプライベートモードまたは別端末でリロードして同じデータが表示されることを確認してください。`);
+          this.render();
+        } catch (err) {
+          alert('移行に失敗しました: ' + err.message);
+        } finally {
+          btn.disabled = false;
+          btn.innerText = '🚀 この端末のデータをFirestoreへ移行';
+        }
+      });
 
       bar.querySelector('#btn-force-server-reload').addEventListener('click', async () => {
         const btn = bar.querySelector('#btn-force-server-reload');

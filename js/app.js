@@ -100,12 +100,15 @@ class App {
     // メインコンテンツ描画
     contentContainer.innerHTML = '';
 
-    // 指示書 6項: 既存画面用「Firestoreサーバーから再読込」一時バー
+    // 指示書 5, 6項: 一時操作バー ＆ データ移行ボタン
     if (this.currentView !== 'syncDiagnostic') {
       const bar = document.createElement('div');
       bar.className = 'mb-4 p-3 bg-slate-900 text-white rounded-lg shadow border border-indigo-500/30 flex flex-wrap items-center justify-between gap-2 text-xs font-mono';
       bar.innerHTML = `
         <div class="flex items-center space-x-3">
+          <button id="btn-migrate-to-firestore" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
+            <span>🚀 この端末のデータをFirestoreへ移行</span>
+          </button>
           <button id="btn-force-server-reload" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
             <span>⚡ Firestoreサーバーから再読込</span>
           </button>
@@ -115,12 +118,41 @@ class App {
           ${this.directFetchResult ? `
             <span class="text-emerald-400 font-bold">取得元: ${this.directFetchResult.loadedFrom}</span> | 
             <span>件数: <strong>${this.directFetchResult.count}</strong></span> | 
-            <span>先頭ID: <code class="bg-slate-800 px-1 rounded text-blue-300">${this.directFetchResult.firstDocId}</code></span> | 
-            <span>最終ID: <code class="bg-slate-800 px-1 rounded text-blue-300">${this.directFetchResult.lastDocId}</code></span> | 
             <span>取得時刻: ${this.directFetchResult.loadedAt}</span>
-          ` : '※ キャッシュを使用せず Firestore サーバーから対象データを直接取得します'}
+          ` : '※ Firestore サーバーが唯一の正本です'}
         </div>
       `;
+
+      // 指示書 5項: 一括データ移行ボタンの処理
+      bar.querySelector('#btn-migrate-to-firestore').addEventListener('click', async () => {
+        const btn = bar.querySelector('#btn-migrate-to-firestore');
+        if (!confirm('この端末（localStorage）にある既存データを Firestore サーバーへ一括移行しますか？')) return;
+
+        btn.disabled = true;
+        btn.innerText = '移行中...';
+
+        try {
+          // localStorage 内の全キーのデータを収集
+          const dataPackage = {
+            selections: JSON.parse(localStorage.getItem('selection_app_selections') || '[]'),
+            companies: JSON.parse(localStorage.getItem('selection_app_companies') || '[]'),
+            jobs: JSON.parse(localStorage.getItem('selection_app_jobs') || '[]'),
+            candidates: JSON.parse(localStorage.getItem('selection_app_candidates') || '[]'),
+            consultants: JSON.parse(localStorage.getItem('selection_app_consultants') || '[]'),
+            qTargets: JSON.parse(localStorage.getItem('selection_app_q_targets') || '[]'),
+            histories: JSON.parse(localStorage.getItem('selection_app_histories') || '[]')
+          };
+
+          const res = await migrateLocalDataToFirestore(dataPackage);
+          alert(`Firestore へのデータ移行が完了しました！\n\n- 選考案件: ${res.selections}件\n- 企業: ${res.companies}件\n- 求人: ${res.jobs}件\n- 候補者: ${res.candidates}件\n- コンサルタント: ${res.consultants}件\n\nプライベートモードまたは別端末でリロードして同じデータが表示されることを確認してください。`);
+          this.render();
+        } catch (err) {
+          alert('移行に失敗しました: ' + err.message);
+        } finally {
+          btn.disabled = false;
+          btn.innerText = '🚀 この端末のデータをFirestoreへ移行';
+        }
+      });
 
       bar.querySelector('#btn-force-server-reload').addEventListener('click', async () => {
         const btn = bar.querySelector('#btn-force-server-reload');
