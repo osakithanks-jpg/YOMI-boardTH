@@ -24,6 +24,7 @@ $files = @(
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\masterManagementView.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\csvImportModal.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\newSelectionModal.js",
+    "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\syncDiagnosticView.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\app.js"
 )
 

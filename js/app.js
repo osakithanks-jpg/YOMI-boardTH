@@ -19,15 +19,25 @@ import { renderMasterManagement } from './components/masterManagementView.js';
 import { openNewSelectionModal } from './components/newSelectionModal.js';
 import { openCsvImportModal } from './components/csvImportModal.js';
 import { openEmailComposerModal } from './components/emailComposerModal.js';
+import { renderSyncDiagnosticView } from './components/syncDiagnosticView.js';
+import { fetchSelectionsFromServerDirect } from './firebase.js';
 
 class App {
   constructor() {
-    this.currentView = VIEWS.DASHBOARD;
+    this.currentView = (window.location.hash === '#sync-diagnostic') ? 'syncDiagnostic' : VIEWS.DASHBOARD;
     this.viewFilters = {};
+    this.directFetchResult = null;
     this.init();
   }
 
   init() {
+    window.addEventListener('hashchange', () => {
+      if (window.location.hash === '#sync-diagnostic') {
+        this.currentView = 'syncDiagnostic';
+        this.render();
+      }
+    });
+
     store.subscribe(() => {
       this.render();
     });
@@ -90,9 +100,50 @@ class App {
     // メインコンテンツ描画
     contentContainer.innerHTML = '';
 
+    // 指示書 6項: 既存画面用「Firestoreサーバーから再読込」一時バー
+    if (this.currentView !== 'syncDiagnostic') {
+      const bar = document.createElement('div');
+      bar.className = 'mb-4 p-3 bg-slate-900 text-white rounded-lg shadow border border-indigo-500/30 flex flex-wrap items-center justify-between gap-2 text-xs font-mono';
+      bar.innerHTML = `
+        <div class="flex items-center space-x-3">
+          <button id="btn-force-server-reload" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
+            <span>⚡ Firestoreサーバーから再読込</span>
+          </button>
+          <a href="#sync-diagnostic" class="text-blue-400 hover:underline font-bold">🧪 診断画面 (/sync-diagnostic) を開く</a>
+        </div>
+        <div id="direct-fetch-status" class="text-slate-300 font-sans">
+          ${this.directFetchResult ? `
+            <span class="text-emerald-400 font-bold">取得元: ${this.directFetchResult.loadedFrom}</span> | 
+            <span>件数: <strong>${this.directFetchResult.count}</strong></span> | 
+            <span>先頭ID: <code class="bg-slate-800 px-1 rounded text-blue-300">${this.directFetchResult.firstDocId}</code></span> | 
+            <span>最終ID: <code class="bg-slate-800 px-1 rounded text-blue-300">${this.directFetchResult.lastDocId}</code></span> | 
+            <span>取得時刻: ${this.directFetchResult.loadedAt}</span>
+          ` : '※ キャッシュを使用せず Firestore サーバーから対象データを直接取得します'}
+        </div>
+      `;
+
+      bar.querySelector('#btn-force-server-reload').addEventListener('click', async () => {
+        const btn = bar.querySelector('#btn-force-server-reload');
+        btn.disabled = true;
+        btn.innerText = '取得中...';
+        const res = await fetchSelectionsFromServerDirect('selections');
+        this.directFetchResult = res;
+        this.render();
+      });
+
+      contentContainer.appendChild(bar);
+    }
+
+    const viewContainer = document.createElement('div');
+    contentContainer.appendChild(viewContainer);
+
     switch (this.currentView) {
+      case 'syncDiagnostic':
+        renderSyncDiagnosticView(viewContainer);
+        break;
+
       case VIEWS.DASHBOARD:
-        renderDashboard(contentContainer, {
+        renderDashboard(viewContainer, {
           onNavigateToSelections: (filters = {}) => {
             this.currentView = VIEWS.SELECTIONS;
             this.viewFilters = filters;

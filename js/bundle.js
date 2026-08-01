@@ -1,5 +1,5 @@
 /**
- * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・ログ管理・診断モジュール
+ * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・診断モジュール
  */
 
 const getFirebaseConfig = () => {
@@ -18,7 +18,6 @@ const getFirebaseConfig = () => {
 let db = null;
 let isFirebaseInitialized = false;
 
-// 診断情報グローバルステート (指示書 1項)
 if (typeof window !== 'undefined') {
   window.DATA_SOURCE_DEBUG_INFO = {
     projectId: "selection-progress-app",
@@ -48,7 +47,6 @@ function initFirebase() {
   try {
     const config = getFirebaseConfig();
     
-    // 指示書 3項: FIREBASE_CONFIG_CHECK ログ
     console.log("FIREBASE_CONFIG_CHECK", {
       projectId: config.projectId,
       appId: config.appId
@@ -60,7 +58,6 @@ function initFirebase() {
       }
       db = firebase.firestore();
 
-      // IndexedDB オフライン永続化の確認
       try {
         db.enablePersistence({ synchronizeTabs: true }).then(() => {
           if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.indexedDbPersistence = true;
@@ -81,14 +78,13 @@ function initFirebase() {
 }
 
 /**
- * リアルタイムコレクション監視 (指示書 2, 5, 8, 10項)
+ * リアルタイムコレクション監視
  */
 function subscribeCollection(collectionName, onUpdate, onError) {
   const firestore = initFirebase();
   const config = getFirebaseConfig();
   const authUid = (typeof firebase !== 'undefined' && firebase.auth) ? (firebase.auth().currentUser?.uid || 'unauthenticated') : 'unauthenticated';
 
-  // 指示書 2項: SHARED_DATA_REFERENCE ログ
   console.log("SHARED_DATA_REFERENCE", {
     projectId: config.projectId,
     databaseId: "(default)",
@@ -103,9 +99,7 @@ function subscribeCollection(collectionName, onUpdate, onError) {
     return () => {};
   }
 
-  // 指示書 8項: SNAPSHOT_LISTENER_STARTED ログ
   console.log("SNAPSHOT_LISTENER_STARTED", { collectionName });
-  // 指示書 5項: FIRESTORE_LOAD_START ログ
   console.log("FIRESTORE_LOAD_START", { collectionName });
 
   try {
@@ -114,14 +108,12 @@ function subscribeCollection(collectionName, onUpdate, onError) {
         const fromCache = snapshot.metadata ? snapshot.metadata.fromCache : false;
         const hasPendingWrites = snapshot.metadata ? snapshot.metadata.hasPendingWrites : false;
 
-        // 指示書 5項: FIRESTORE_SNAPSHOT_METADATA ログ
         console.log("FIRESTORE_SNAPSHOT_METADATA", {
           collectionName,
           fromCache,
           hasPendingWrites
         });
 
-        // 診断情報の更新
         if (window.DATA_SOURCE_DEBUG_INFO) {
           window.DATA_SOURCE_DEBUG_INFO.projectId = config.projectId;
           window.DATA_SOURCE_DEBUG_INFO.collection = collectionName;
@@ -132,30 +124,15 @@ function subscribeCollection(collectionName, onUpdate, onError) {
           window.DATA_SOURCE_DEBUG_INFO.lastLoadedAt = new Date().toLocaleTimeString();
         }
 
-        // 指示書 8項: SNAPSHOT_RECEIVED ログ
-        console.log("SNAPSHOT_RECEIVED", {
-          collectionName,
-          documentCount: snapshot.size
-        });
+        console.log("SNAPSHOT_RECEIVED", { collectionName, documentCount: snapshot.size });
+        console.log("FIRESTORE_LOAD_SUCCESS", { collectionName, documentCount: snapshot.size });
 
-        // 指示書 5項: FIRESTORE_LOAD_SUCCESS ログ
-        console.log("FIRESTORE_LOAD_SUCCESS", {
-          collectionName,
-          documentCount: snapshot.size
-        });
-
-        const dataList = snapshot.docs.map(doc => ({
-          docId: doc.id,
-          ...doc.data()
-        }));
-
-        // 指示書 5項: FIRESTORE_LOADED_DATA ログ
+        const dataList = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
         console.log("FIRESTORE_LOADED_DATA", dataList);
 
         if (onUpdate) onUpdate(dataList);
       },
       (error) => {
-        // 指示書 5, 10項: FIRESTORE_LOAD_ERROR ログ
         console.error("FIRESTORE_LOAD_ERROR", {
           collectionName,
           code: error.code,
@@ -180,73 +157,120 @@ function subscribeCollection(collectionName, onUpdate, onError) {
 }
 
 /**
- * 明示的サーバーデータ直接フェッチ (指示書 5項: getDocsFromServer)
+ * 指示書 2, 3, 5項: 強制切り分け用 syncDiagnostics/shared-test サーバー直接取得 ＆ 自動作成
  */
-async function fetchCollectionFromServer(collectionName) {
+async function fetchSyncDiagnosticFromServer() {
   const firestore = initFirebase();
-  if (!firestore) return [];
+  const config = getFirebaseConfig();
+  const authUid = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : 'unauthenticated';
+
+  if (!firestore) {
+    return {
+      success: false,
+      error: { code: 'SDK_NOT_LOADED', message: 'Firebase SDK / Firestore is not initialized' }
+    };
+  }
+
+  const collectionName = "syncDiagnostics";
+  const docId = "shared-test";
+  const docRef = firestore.collection(collectionName).doc(docId);
+
+  // 1. 初回作成またはデータ確定
+  const initialPayload = {
+    message: "COMMON DATA TEST 2026-08-02",
+    testNumber: 8202,
+    updatedBy: "Antigravity",
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    // まずサーバーからの直接取得を試みる
+    let snapshot;
+    try {
+      snapshot = await docRef.get({ source: 'server' });
+    } catch (serverErr) {
+      // ドキュメント未存在または初回読み込み失敗の場合に作成
+      await docRef.set(initialPayload, { merge: true });
+      snapshot = await docRef.get({ source: 'server' });
+    }
+
+    if (!snapshot.exists) {
+      await docRef.set(initialPayload, { merge: true });
+      snapshot = await docRef.get({ source: 'server' });
+    }
+
+    const data = snapshot.data();
+
+    return {
+      success: true,
+      projectId: config.projectId,
+      databaseId: "(default)",
+      documentPath: `${collectionName}/${docId}`,
+      exists: snapshot.exists,
+      message: data.message || "COMMON DATA TEST 2026-08-02",
+      testNumber: data.testNumber || 8202,
+      updatedBy: data.updatedBy || "Antigravity",
+      updatedAt: data.updatedAt || new Date().toISOString(),
+      loadedFrom: "Firestore server",
+      loadedAt: new Date().toLocaleTimeString(),
+      authUid
+    };
+  } catch (error) {
+    console.error("FIRESTORE DIRECT READ FAILED:", error);
+    return {
+      success: false,
+      projectId: config.projectId,
+      databaseId: "(default)",
+      documentPath: `${collectionName}/${docId}`,
+      error: {
+        code: error.code || 'UNKNOWN_ERROR',
+        message: error.message || String(error)
+      }
+    };
+  }
+}
+
+/**
+ * 指示書 6項: 既存画面用「Firestoreサーバーから再読込」直接フェッチ関数
+ */
+async function fetchSelectionsFromServerDirect(collectionName = 'selections') {
+  const firestore = initFirebase();
+  if (!firestore) {
+    return { success: false, error: 'Firestore is not initialized' };
+  }
 
   try {
     const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
+    const docs = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
 
-    // 指示書 5項: FIRESTORE_SERVER_RESULT ログ
-    console.log("FIRESTORE_SERVER_RESULT", {
-      collectionName,
+    const result = {
+      success: true,
+      loadedFrom: "Firestore server",
       count: snapshot.size,
-      ids: snapshot.docs.map(doc => doc.id)
-    });
+      firstDocId: docs.length > 0 ? docs[0].docId : "-",
+      lastDocId: docs.length > 0 ? docs[docs.length - 1].docId : "-",
+      loadedAt: new Date().toLocaleTimeString(),
+      items: docs
+    };
 
-    return snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
-  } catch (err) {
-    console.warn(`Server fetch for ${collectionName} failed:`, err);
-    return [];
+    console.log("FIRESTORE_DIRECT_SELECTIONS_FETCH", result);
+    return result;
+  } catch (error) {
+    console.error("FIRESTORE DIRECT SELECTIONS FETCH FAILED:", error);
+    return {
+      success: false,
+      error: error.message || String(error)
+    };
   }
 }
 
 /**
- * 特定1件のテストドキュメント直接検証 (指示書 9項: getDocFromServer)
- */
-async function verifyTestDocument(collectionName = "selections", testDocId = "TEST_SHARED_RECORD_20260802") {
-  const firestore = initFirebase();
-  if (!firestore) return null;
-
-  try {
-    const docRef = firestore.collection(collectionName).doc(testDocId);
-    const snapshot = await docRef.get({ source: 'server' }).catch(() => docRef.get());
-
-    const exists = snapshot.exists;
-    const val = exists ? JSON.stringify(snapshot.data()).substring(0, 30) + "..." : "not found";
-
-    if (window.DATA_SOURCE_DEBUG_INFO) {
-      window.DATA_SOURCE_DEBUG_INFO.testDocId = testDocId;
-      window.DATA_SOURCE_DEBUG_INFO.testDocExists = exists;
-      window.DATA_SOURCE_DEBUG_INFO.testDocValue = val;
-    }
-
-    console.log("TEST_DOCUMENT_VERIFICATION", {
-      testDocId,
-      exists,
-      data: exists ? snapshot.data() : null
-    });
-
-    return exists ? snapshot.data() : null;
-  } catch (e) {
-    console.warn("Test doc verification failed:", e);
-    return null;
-  }
-}
-
-/**
- * Firestore ドキュメント保存 (指示書 4, 10項)
+ * Firestore ドキュメント保存
  */
 async function saveDocument(collectionName, docId, payload) {
   const firestore = initFirebase();
   
-  // 指示書 4項: FIRESTORE_SAVE_START ログ
-  console.log("FIRESTORE_SAVE_START", {
-    collectionName,
-    payload
-  });
+  console.log("FIRESTORE_SAVE_START", { collectionName, payload });
 
   if (!firestore) {
     console.warn("Firestore not initialized. Local cache only.");
@@ -257,15 +281,9 @@ async function saveDocument(collectionName, docId, payload) {
     const targetId = docId || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4));
     await firestore.collection(collectionName).doc(targetId).set(payload, { merge: true });
 
-    // 指示書 4項: FIRESTORE_SAVE_SUCCESS ログ
-    console.log("FIRESTORE_SAVE_SUCCESS", {
-      collectionName,
-      documentId: targetId
-    });
-
+    console.log("FIRESTORE_SAVE_SUCCESS", { collectionName, documentId: targetId });
     return true;
   } catch (error) {
-    // 指示書 4, 10項: FIRESTORE_SAVE_ERROR ログ
     console.error("FIRESTORE_SAVE_ERROR", {
       collectionName,
       code: error.code,
@@ -283,12 +301,7 @@ async function deleteDocument(collectionName, docId) {
     await firestore.collection(collectionName).doc(docId).delete();
     return true;
   } catch (error) {
-    console.error("FIRESTORE_DELETE_ERROR", {
-      collectionName,
-      docId,
-      code: error.code,
-      message: error.message
-    });
+    console.error("FIRESTORE_DELETE_ERROR", { collectionName, docId, code: error.code, message: error.message });
     throw error;
   }
 }
@@ -10440,6 +10453,144 @@ function showSimilarWarningModal(inputName, similarCands, callback) {
 }
 
 
+
+
+/**
+ * 指示書 1, 3, 4項: 共通データ不一致の強制切り分けテスト専用画面 (/sync-diagnostic)
+ * ※ localStorage, sessionStorage, IndexedDB, デモデータ, 既存 state を完全遮断
+ */
+async function renderSyncDiagnosticView(container) {
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="max-w-4xl mx-auto p-6 space-y-6">
+      <!-- ヘッダー -->
+      <div class="bg-slate-900 text-white p-6 rounded-xl shadow-2xl border border-blue-500/30 flex justify-between items-center">
+        <div>
+          <div class="inline-flex items-center space-x-2 bg-blue-500/20 text-blue-400 font-mono text-xs px-3 py-1 rounded-full border border-blue-500/30 mb-2">
+            <span>🧪 FORCED ISOLATION DIAGNOSTIC</span>
+          </div>
+          <h1 class="text-2xl font-black tracking-tight text-slate-100">SYNC DIAGNOSTIC</h1>
+          <p class="text-xs text-slate-400 mt-1">Firestore サーバーから固定ドキュメント (syncDiagnostics/shared-test) を直接強制読み込み</p>
+        </div>
+        <button id="btn-reload-diagnostic" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg transition-all shadow-md flex items-center space-x-2">
+          <span>🔄 サーバーから再取得</span>
+        </button>
+      </div>
+
+      <!-- 診断結果表示カード -->
+      <div id="diagnostic-result-container" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm min-h-[300px]">
+        <div class="flex items-center justify-center min-h-[240px] space-x-3 text-slate-500">
+          <div class="w-6 h-6 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <span class="font-bold text-sm">Firestore サーバーから直接取得中...</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const reloadBtn = container.querySelector('#btn-reload-diagnostic');
+  if (reloadBtn) {
+    reloadBtn.addEventListener('click', () => renderSyncDiagnosticView(container));
+  }
+
+  const resultContainer = container.querySelector('#diagnostic-result-container');
+
+  // 指示書 1項: 他のキャッシュや state を介さず、サーバーから直接フェッチ
+  const res = await fetchSyncDiagnosticFromServer();
+
+  if (res.success) {
+    resultContainer.innerHTML = `
+      <div class="space-y-4 font-mono text-sm">
+        <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 font-bold text-base flex justify-between items-center">
+          <div class="flex items-center space-x-2">
+            <span class="w-3 h-3 bg-emerald-500 rounded-full animate-pulse"></span>
+            <span>FIRESTORE DIRECT READ SUCCESS</span>
+          </div>
+          <span class="text-xs bg-emerald-200 text-emerald-800 px-2.5 py-1 rounded-full font-sans">Loaded from: ${res.loadedFrom}</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
+          <div>
+            <span class="text-xs text-slate-500 font-sans block">Project ID</span>
+            <span class="font-bold text-slate-800 text-base">${res.projectId}</span>
+          </div>
+          <div>
+            <span class="text-xs text-slate-500 font-sans block">Database ID</span>
+            <span class="font-bold text-slate-800 text-base">${res.databaseId}</span>
+          </div>
+          <div class="md:col-span-2">
+            <span class="text-xs text-slate-500 font-sans block">Document path</span>
+            <span class="font-bold text-blue-600 text-base bg-blue-50 px-2 py-0.5 rounded border border-blue-200 inline-block">${res.documentPath}</span>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 text-slate-100 p-5 rounded-xl space-y-3 shadow-inner">
+          <div class="grid grid-cols-2 gap-4 border-b border-slate-800 pb-3">
+            <div>
+              <span class="text-xs text-slate-400 font-sans block">Exists</span>
+              <span class="font-bold text-emerald-400 text-base">${res.exists ? 'true' : 'false'}</span>
+            </div>
+            <div>
+              <span class="text-xs text-slate-400 font-sans block">Test number</span>
+              <span class="font-bold text-amber-400 text-base">${res.testNumber}</span>
+            </div>
+          </div>
+
+          <div class="py-1">
+            <span class="text-xs text-slate-400 font-sans block">Message</span>
+            <span class="font-black text-white text-lg tracking-wide bg-slate-800 px-3 py-1 rounded inline-block mt-1 border border-slate-700">${res.message}</span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 border-t border-slate-800 pt-3 text-xs">
+            <div>
+              <span class="text-slate-400 font-sans block">Updated by</span>
+              <span class="text-slate-200 font-semibold">${res.updatedBy}</span>
+            </div>
+            <div>
+              <span class="text-slate-400 font-sans block">Updated at</span>
+              <span class="text-slate-200 font-semibold">${res.updatedAt}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 text-xs font-sans text-slate-600 bg-white p-3 rounded border border-slate-200">
+          <div>
+            <span class="font-bold text-slate-700">Loaded at:</span> ${res.loadedAt}
+          </div>
+          <div>
+            <span class="font-bold text-slate-700">Auth UID:</span> <code class="bg-slate-100 px-1 py-0.5 rounded">${res.authUid}</code>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    // 指示書 3項: エラー発生時はエラーコード・メッセージを画面上に明示表示
+    resultContainer.innerHTML = `
+      <div class="p-5 bg-rose-50 border-2 border-rose-300 rounded-xl space-y-4 font-mono">
+        <div class="flex items-center space-x-2 text-rose-800 font-bold text-base">
+          <span>❌ FIRESTORE DIRECT READ FAILED</span>
+        </div>
+
+        <div class="bg-white p-4 rounded-lg border border-rose-200 space-y-2 text-sm">
+          <div>
+            <span class="text-xs text-slate-500 font-sans block">Error code</span>
+            <span class="font-bold text-rose-600">${res.error?.code || 'UNKNOWN'}</span>
+          </div>
+          <div>
+            <span class="text-xs text-slate-500 font-sans block">Error message</span>
+            <p class="text-xs text-slate-800 bg-slate-50 p-2 rounded border border-slate-200 font-mono mt-1">${res.error?.message || 'Failed to read document'}</p>
+          </div>
+        </div>
+
+        <div class="text-xs text-slate-600 font-sans">
+          ※ 認証・権限、Vercel環境変数、またはネットワーク接続をご確認ください。
+        </div>
+      </div>
+    `;
+  }
+}
+
+
 /**
  * 選考進捗・ヨミ管理システム - メインアプリケーションエントリーポイント (CA/RA・企業対応拡張版)
  */
@@ -10462,14 +10613,24 @@ function showSimilarWarningModal(inputName, similarCands, callback) {
 
 
 
+
+
 class App {
   constructor() {
-    this.currentView = VIEWS.DASHBOARD;
+    this.currentView = (window.location.hash === '#sync-diagnostic') ? 'syncDiagnostic' : VIEWS.DASHBOARD;
     this.viewFilters = {};
+    this.directFetchResult = null;
     this.init();
   }
 
   init() {
+    window.addEventListener('hashchange', () => {
+      if (window.location.hash === '#sync-diagnostic') {
+        this.currentView = 'syncDiagnostic';
+        this.render();
+      }
+    });
+
     store.subscribe(() => {
       this.render();
     });
@@ -10532,9 +10693,50 @@ class App {
     // メインコンテンツ描画
     contentContainer.innerHTML = '';
 
+    // 指示書 6項: 既存画面用「Firestoreサーバーから再読込」一時バー
+    if (this.currentView !== 'syncDiagnostic') {
+      const bar = document.createElement('div');
+      bar.className = 'mb-4 p-3 bg-slate-900 text-white rounded-lg shadow border border-indigo-500/30 flex flex-wrap items-center justify-between gap-2 text-xs font-mono';
+      bar.innerHTML = `
+        <div class="flex items-center space-x-3">
+          <button id="btn-force-server-reload" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
+            <span>⚡ Firestoreサーバーから再読込</span>
+          </button>
+          <a href="#sync-diagnostic" class="text-blue-400 hover:underline font-bold">🧪 診断画面 (/sync-diagnostic) を開く</a>
+        </div>
+        <div id="direct-fetch-status" class="text-slate-300 font-sans">
+          ${this.directFetchResult ? `
+            <span class="text-emerald-400 font-bold">取得元: ${this.directFetchResult.loadedFrom}</span> | 
+            <span>件数: <strong>${this.directFetchResult.count}</strong></span> | 
+            <span>先頭ID: <code class="bg-slate-800 px-1 rounded text-blue-300">${this.directFetchResult.firstDocId}</code></span> | 
+            <span>最終ID: <code class="bg-slate-800 px-1 rounded text-blue-300">${this.directFetchResult.lastDocId}</code></span> | 
+            <span>取得時刻: ${this.directFetchResult.loadedAt}</span>
+          ` : '※ キャッシュを使用せず Firestore サーバーから対象データを直接取得します'}
+        </div>
+      `;
+
+      bar.querySelector('#btn-force-server-reload').addEventListener('click', async () => {
+        const btn = bar.querySelector('#btn-force-server-reload');
+        btn.disabled = true;
+        btn.innerText = '取得中...';
+        const res = await fetchSelectionsFromServerDirect('selections');
+        this.directFetchResult = res;
+        this.render();
+      });
+
+      contentContainer.appendChild(bar);
+    }
+
+    const viewContainer = document.createElement('div');
+    contentContainer.appendChild(viewContainer);
+
     switch (this.currentView) {
+      case 'syncDiagnostic':
+        renderSyncDiagnosticView(viewContainer);
+        break;
+
       case VIEWS.DASHBOARD:
-        renderDashboard(contentContainer, {
+        renderDashboard(viewContainer, {
           onNavigateToSelections: (filters = {}) => {
             this.currentView = VIEWS.SELECTIONS;
             this.viewFilters = filters;

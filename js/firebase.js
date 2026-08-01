@@ -1,5 +1,5 @@
 /**
- * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・ログ管理・診断モジュール
+ * 選考進捗・ヨミ管理システム - Firebase / Firestore 連携・診断モジュール
  */
 
 const getFirebaseConfig = () => {
@@ -18,7 +18,6 @@ const getFirebaseConfig = () => {
 let db = null;
 let isFirebaseInitialized = false;
 
-// 診断情報グローバルステート (指示書 1項)
 if (typeof window !== 'undefined') {
   window.DATA_SOURCE_DEBUG_INFO = {
     projectId: "selection-progress-app",
@@ -48,7 +47,6 @@ export function initFirebase() {
   try {
     const config = getFirebaseConfig();
     
-    // 指示書 3項: FIREBASE_CONFIG_CHECK ログ
     console.log("FIREBASE_CONFIG_CHECK", {
       projectId: config.projectId,
       appId: config.appId
@@ -60,7 +58,6 @@ export function initFirebase() {
       }
       db = firebase.firestore();
 
-      // IndexedDB オフライン永続化の確認
       try {
         db.enablePersistence({ synchronizeTabs: true }).then(() => {
           if (window.DATA_SOURCE_DEBUG_INFO) window.DATA_SOURCE_DEBUG_INFO.indexedDbPersistence = true;
@@ -81,14 +78,13 @@ export function initFirebase() {
 }
 
 /**
- * リアルタイムコレクション監視 (指示書 2, 5, 8, 10項)
+ * リアルタイムコレクション監視
  */
 export function subscribeCollection(collectionName, onUpdate, onError) {
   const firestore = initFirebase();
   const config = getFirebaseConfig();
   const authUid = (typeof firebase !== 'undefined' && firebase.auth) ? (firebase.auth().currentUser?.uid || 'unauthenticated') : 'unauthenticated';
 
-  // 指示書 2項: SHARED_DATA_REFERENCE ログ
   console.log("SHARED_DATA_REFERENCE", {
     projectId: config.projectId,
     databaseId: "(default)",
@@ -103,9 +99,7 @@ export function subscribeCollection(collectionName, onUpdate, onError) {
     return () => {};
   }
 
-  // 指示書 8項: SNAPSHOT_LISTENER_STARTED ログ
   console.log("SNAPSHOT_LISTENER_STARTED", { collectionName });
-  // 指示書 5項: FIRESTORE_LOAD_START ログ
   console.log("FIRESTORE_LOAD_START", { collectionName });
 
   try {
@@ -114,14 +108,12 @@ export function subscribeCollection(collectionName, onUpdate, onError) {
         const fromCache = snapshot.metadata ? snapshot.metadata.fromCache : false;
         const hasPendingWrites = snapshot.metadata ? snapshot.metadata.hasPendingWrites : false;
 
-        // 指示書 5項: FIRESTORE_SNAPSHOT_METADATA ログ
         console.log("FIRESTORE_SNAPSHOT_METADATA", {
           collectionName,
           fromCache,
           hasPendingWrites
         });
 
-        // 診断情報の更新
         if (window.DATA_SOURCE_DEBUG_INFO) {
           window.DATA_SOURCE_DEBUG_INFO.projectId = config.projectId;
           window.DATA_SOURCE_DEBUG_INFO.collection = collectionName;
@@ -132,30 +124,15 @@ export function subscribeCollection(collectionName, onUpdate, onError) {
           window.DATA_SOURCE_DEBUG_INFO.lastLoadedAt = new Date().toLocaleTimeString();
         }
 
-        // 指示書 8項: SNAPSHOT_RECEIVED ログ
-        console.log("SNAPSHOT_RECEIVED", {
-          collectionName,
-          documentCount: snapshot.size
-        });
+        console.log("SNAPSHOT_RECEIVED", { collectionName, documentCount: snapshot.size });
+        console.log("FIRESTORE_LOAD_SUCCESS", { collectionName, documentCount: snapshot.size });
 
-        // 指示書 5項: FIRESTORE_LOAD_SUCCESS ログ
-        console.log("FIRESTORE_LOAD_SUCCESS", {
-          collectionName,
-          documentCount: snapshot.size
-        });
-
-        const dataList = snapshot.docs.map(doc => ({
-          docId: doc.id,
-          ...doc.data()
-        }));
-
-        // 指示書 5項: FIRESTORE_LOADED_DATA ログ
+        const dataList = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
         console.log("FIRESTORE_LOADED_DATA", dataList);
 
         if (onUpdate) onUpdate(dataList);
       },
       (error) => {
-        // 指示書 5, 10項: FIRESTORE_LOAD_ERROR ログ
         console.error("FIRESTORE_LOAD_ERROR", {
           collectionName,
           code: error.code,
@@ -180,73 +157,120 @@ export function subscribeCollection(collectionName, onUpdate, onError) {
 }
 
 /**
- * 明示的サーバーデータ直接フェッチ (指示書 5項: getDocsFromServer)
+ * 指示書 2, 3, 5項: 強制切り分け用 syncDiagnostics/shared-test サーバー直接取得 ＆ 自動作成
  */
-export async function fetchCollectionFromServer(collectionName) {
+export async function fetchSyncDiagnosticFromServer() {
   const firestore = initFirebase();
-  if (!firestore) return [];
+  const config = getFirebaseConfig();
+  const authUid = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : 'unauthenticated';
+
+  if (!firestore) {
+    return {
+      success: false,
+      error: { code: 'SDK_NOT_LOADED', message: 'Firebase SDK / Firestore is not initialized' }
+    };
+  }
+
+  const collectionName = "syncDiagnostics";
+  const docId = "shared-test";
+  const docRef = firestore.collection(collectionName).doc(docId);
+
+  // 1. 初回作成またはデータ確定
+  const initialPayload = {
+    message: "COMMON DATA TEST 2026-08-02",
+    testNumber: 8202,
+    updatedBy: "Antigravity",
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    // まずサーバーからの直接取得を試みる
+    let snapshot;
+    try {
+      snapshot = await docRef.get({ source: 'server' });
+    } catch (serverErr) {
+      // ドキュメント未存在または初回読み込み失敗の場合に作成
+      await docRef.set(initialPayload, { merge: true });
+      snapshot = await docRef.get({ source: 'server' });
+    }
+
+    if (!snapshot.exists) {
+      await docRef.set(initialPayload, { merge: true });
+      snapshot = await docRef.get({ source: 'server' });
+    }
+
+    const data = snapshot.data();
+
+    return {
+      success: true,
+      projectId: config.projectId,
+      databaseId: "(default)",
+      documentPath: `${collectionName}/${docId}`,
+      exists: snapshot.exists,
+      message: data.message || "COMMON DATA TEST 2026-08-02",
+      testNumber: data.testNumber || 8202,
+      updatedBy: data.updatedBy || "Antigravity",
+      updatedAt: data.updatedAt || new Date().toISOString(),
+      loadedFrom: "Firestore server",
+      loadedAt: new Date().toLocaleTimeString(),
+      authUid
+    };
+  } catch (error) {
+    console.error("FIRESTORE DIRECT READ FAILED:", error);
+    return {
+      success: false,
+      projectId: config.projectId,
+      databaseId: "(default)",
+      documentPath: `${collectionName}/${docId}`,
+      error: {
+        code: error.code || 'UNKNOWN_ERROR',
+        message: error.message || String(error)
+      }
+    };
+  }
+}
+
+/**
+ * 指示書 6項: 既存画面用「Firestoreサーバーから再読込」直接フェッチ関数
+ */
+export async function fetchSelectionsFromServerDirect(collectionName = 'selections') {
+  const firestore = initFirebase();
+  if (!firestore) {
+    return { success: false, error: 'Firestore is not initialized' };
+  }
 
   try {
     const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
+    const docs = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
 
-    // 指示書 5項: FIRESTORE_SERVER_RESULT ログ
-    console.log("FIRESTORE_SERVER_RESULT", {
-      collectionName,
+    const result = {
+      success: true,
+      loadedFrom: "Firestore server",
       count: snapshot.size,
-      ids: snapshot.docs.map(doc => doc.id)
-    });
+      firstDocId: docs.length > 0 ? docs[0].docId : "-",
+      lastDocId: docs.length > 0 ? docs[docs.length - 1].docId : "-",
+      loadedAt: new Date().toLocaleTimeString(),
+      items: docs
+    };
 
-    return snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
-  } catch (err) {
-    console.warn(`Server fetch for ${collectionName} failed:`, err);
-    return [];
+    console.log("FIRESTORE_DIRECT_SELECTIONS_FETCH", result);
+    return result;
+  } catch (error) {
+    console.error("FIRESTORE DIRECT SELECTIONS FETCH FAILED:", error);
+    return {
+      success: false,
+      error: error.message || String(error)
+    };
   }
 }
 
 /**
- * 特定1件のテストドキュメント直接検証 (指示書 9項: getDocFromServer)
- */
-export async function verifyTestDocument(collectionName = "selections", testDocId = "TEST_SHARED_RECORD_20260802") {
-  const firestore = initFirebase();
-  if (!firestore) return null;
-
-  try {
-    const docRef = firestore.collection(collectionName).doc(testDocId);
-    const snapshot = await docRef.get({ source: 'server' }).catch(() => docRef.get());
-
-    const exists = snapshot.exists;
-    const val = exists ? JSON.stringify(snapshot.data()).substring(0, 30) + "..." : "not found";
-
-    if (window.DATA_SOURCE_DEBUG_INFO) {
-      window.DATA_SOURCE_DEBUG_INFO.testDocId = testDocId;
-      window.DATA_SOURCE_DEBUG_INFO.testDocExists = exists;
-      window.DATA_SOURCE_DEBUG_INFO.testDocValue = val;
-    }
-
-    console.log("TEST_DOCUMENT_VERIFICATION", {
-      testDocId,
-      exists,
-      data: exists ? snapshot.data() : null
-    });
-
-    return exists ? snapshot.data() : null;
-  } catch (e) {
-    console.warn("Test doc verification failed:", e);
-    return null;
-  }
-}
-
-/**
- * Firestore ドキュメント保存 (指示書 4, 10項)
+ * Firestore ドキュメント保存
  */
 export async function saveDocument(collectionName, docId, payload) {
   const firestore = initFirebase();
   
-  // 指示書 4項: FIRESTORE_SAVE_START ログ
-  console.log("FIRESTORE_SAVE_START", {
-    collectionName,
-    payload
-  });
+  console.log("FIRESTORE_SAVE_START", { collectionName, payload });
 
   if (!firestore) {
     console.warn("Firestore not initialized. Local cache only.");
@@ -257,15 +281,9 @@ export async function saveDocument(collectionName, docId, payload) {
     const targetId = docId || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4));
     await firestore.collection(collectionName).doc(targetId).set(payload, { merge: true });
 
-    // 指示書 4項: FIRESTORE_SAVE_SUCCESS ログ
-    console.log("FIRESTORE_SAVE_SUCCESS", {
-      collectionName,
-      documentId: targetId
-    });
-
+    console.log("FIRESTORE_SAVE_SUCCESS", { collectionName, documentId: targetId });
     return true;
   } catch (error) {
-    // 指示書 4, 10項: FIRESTORE_SAVE_ERROR ログ
     console.error("FIRESTORE_SAVE_ERROR", {
       collectionName,
       code: error.code,
@@ -283,12 +301,7 @@ export async function deleteDocument(collectionName, docId) {
     await firestore.collection(collectionName).doc(docId).delete();
     return true;
   } catch (error) {
-    console.error("FIRESTORE_DELETE_ERROR", {
-      collectionName,
-      docId,
-      code: error.code,
-      message: error.message
-    });
+    console.error("FIRESTORE_DELETE_ERROR", { collectionName, docId, code: error.code, message: error.message });
     throw error;
   }
 }
