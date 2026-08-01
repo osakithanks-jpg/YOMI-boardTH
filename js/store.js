@@ -15,6 +15,7 @@ import {
   INITIAL_COMPANY_COMMUNICATIONS
 } from './constants.js';
 import { deriveCompanyActionFromSelection } from './utils/kanbanCalculations.js';
+import { initFirebase, subscribeCollection, saveDocument, deleteDocument } from './firebase.js';
 
 const STORAGE_KEYS = {
   CONSULTANTS: 'selection_app_consultants',
@@ -33,21 +34,79 @@ const STORAGE_KEYS = {
   MASTER_AUDIT_LOGS: 'selection_app_master_audit_logs',
   CURRENT_CONSULTANT: 'selection_app_current_consultant',
   SIMULATED_ROLE: 'selection_app_simulated_role',
-  IS_INITIALIZED: 'selection_app_initialized' // デモデータ自動再生成停止フラグ (指示書 3, 14項)
+  IS_INITIALIZED: 'selection_app_initialized'
 };
 
 class Store {
   constructor() {
     this.listeners = [];
+    this.isLoading = true; // 指示書 9項: ローディング状態制御
+    this.firestoreSyncedCollections = new Set();
     this.initData();
+    this.initFirestoreSync();
   }
 
   initData() {
-    const isInitialized = localStorage.getItem(STORAGE_KEYS.IS_INITIALIZED) === 'true';
-
+    // ローカルキャッシュの読み込み (Firestore受信前の一時表示用)
     if (!localStorage.getItem(STORAGE_KEYS.CONSULTANTS)) {
       localStorage.setItem(STORAGE_KEYS.CONSULTANTS, JSON.stringify(INITIAL_CONSULTANTS));
     }
+    if (!localStorage.getItem(STORAGE_KEYS.CURRENT_CONSULTANT)) {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_CONSULTANT, JSON.stringify(INITIAL_CONSULTANTS[0]));
+    }
+  }
+
+  initFirestoreSync() {
+    // 指示書 7, 8項: 共通データの正本は Firestore。各コレクションのリアルタイム監視を開始。
+    const collectionsToSync = [
+      { name: 'selections', key: STORAGE_KEYS.SELECTIONS },
+      { name: 'companies', key: STORAGE_KEYS.COMPANIES },
+      { name: 'jobs', key: STORAGE_KEYS.JOBS },
+      { name: 'candidates', key: STORAGE_KEYS.CANDIDATES },
+      { name: 'consultants', key: STORAGE_KEYS.CONSULTANTS },
+      { name: 'qTargets', key: STORAGE_KEYS.Q_TARGETS },
+      { name: 'histories', key: STORAGE_KEYS.HISTORIES },
+      { name: 'companyCommunications', key: STORAGE_KEYS.COMPANY_COMMUNICATIONS }
+    ];
+
+    let loadedCount = 0;
+
+    collectionsToSync.forEach(({ name, key }) => {
+      subscribeCollection(
+        name,
+        (items) => {
+          // 指示書 7項: Firestore から取得した正本データでローカル状態およびキャッシュを更新
+          if (items && Array.isArray(items)) {
+            // Firestore 内にデータが存在する場合はローカルキャッシュへ保存
+            if (items.length > 0) {
+              localStorage.setItem(key, JSON.stringify(items));
+            } else {
+              // 初回などで Firestore が空の場合のみ、ローカル初期データが存在すれば初期投入可能
+              const cached = this.getItem(key);
+              if (cached && cached.length > 0 && !localStorage.getItem(STORAGE_KEYS.IS_INITIALIZED)) {
+                // 初回のみ
+              }
+            }
+          }
+
+          this.firestoreSyncedCollections.add(name);
+          
+          // 全主要コレクションの監視・初回データ受信が完了したらローディング解除 (指示書 9項)
+          if (this.firestoreSyncedCollections.size >= 4) {
+            this.isLoading = false;
+          }
+
+          this.notify();
+        },
+        (error) => {
+          console.warn(`Firestore sync fallback for ${name}:`, error);
+          // エラー時でもオフラインキャッシュ動作を保証
+          this.isLoading = false;
+          this.notify();
+        }
+      );
+    });
+  }
 
     // 初回起動時（初期化フラグがまだ未セットの場合）のみ初期デモデータを投入
     if (!isInitialized) {
@@ -283,9 +342,35 @@ class Store {
   setItem(key, data) {
     try {
       localStorage.setItem(key, JSON.stringify(data));
+
+      // キーから Firestore コレクション名へのマッピング (指示書 4, 7項)
+      const keyToCollection = {
+        [STORAGE_KEYS.SELECTIONS]: 'selections',
+        [STORAGE_KEYS.COMPANIES]: 'companies',
+        [STORAGE_KEYS.JOBS]: 'jobs',
+        [STORAGE_KEYS.CANDIDATES]: 'candidates',
+        [STORAGE_KEYS.CONSULTANTS]: 'consultants',
+        [STORAGE_KEYS.Q_TARGETS]: 'qTargets',
+        [STORAGE_KEYS.HISTORIES]: 'histories',
+        [STORAGE_KEYS.COMPANY_COMMUNICATIONS]: 'companyCommunications'
+      };
+
+      const collectionName = keyToCollection[key];
+      if (collectionName && Array.isArray(data)) {
+        // Firestore ドキュメントの一括保存 (IDをキーとしてドキュメント化)
+        data.forEach(item => {
+          const docId = item.selectionId || item.companyId || item.jobId || item.candidateId || item.consultantId || item.id || item.historyId;
+          if (docId) {
+            saveDocument(collectionName, String(docId), item).catch(err => {
+              console.warn(`Background Firestore save failed for ${collectionName}/${docId}:`, err);
+            });
+          }
+        });
+      }
+
       this.notify();
     } catch (e) {
-      console.error(`Error writing ${key} to localStorage`, e);
+      console.error(`Error writing ${key} to localStorage/Firestore`, e);
     }
   }
 

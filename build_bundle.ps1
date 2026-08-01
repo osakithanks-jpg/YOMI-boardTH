@@ -1,4 +1,5 @@
 $files = @(
+    "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\firebase.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\constants.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\store.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\utils\yomiCalculations.js",

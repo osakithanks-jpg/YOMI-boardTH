@@ -42,6 +42,25 @@ class App {
 
     if (!headerContainer || !sidebarContainer || !contentContainer) return;
 
+    // 指示書 9項: Firestore 共通データ読み込み中のローディング表示
+    if (store.isLoading) {
+      contentContainer.innerHTML = `
+        <div class="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
+          <div class="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+          <p class="text-slate-800 font-extrabold text-base">共通データを読み込んでいます</p>
+          <p class="text-xs text-slate-500">Firestore から最新のデータを同期中です...</p>
+        </div>
+      `;
+      return;
+    }
+
+    // 指示書 6項: 画面描画直前の一時共有データログ
+    const sharedSelections = store.getSelections();
+    console.log("RENDER_SHARED_DATA", {
+      itemCount: sharedSelections.length,
+      items: sharedSelections
+    });
+
     // ヘッダー描画
     renderHeader(headerContainer, {
       activeViewTitle: this.getViewTitle(this.currentView),
