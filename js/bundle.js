@@ -1,5 +1,5 @@
 /**
- * 選考進捗・ヨミ管理システム - Firebase / Firestore リアルタイム同期モジュール
+ * 選考進捗・ヨミ管理システム - Firebase / 端末B リアルタイム診断モジュール
  */
 
 const getFirebaseConfig = () => {
@@ -17,6 +17,24 @@ const getFirebaseConfig = () => {
 
 let db = null;
 let isFirebaseInitialized = false;
+
+// 端末B 診断用グローバルオブジェクト (指示書 1, 6項)
+if (typeof window !== 'undefined') {
+  window.TERMINAL_B_DEBUG = {
+    projectId: "selection-progress-app",
+    databaseId: "(default)",
+    targetCollection: "selections",
+    serverReadCount: 0,
+    snapshotCount: 0,
+    snapshotStarted: false,
+    snapshotReceiveCount: 0,
+    fromCache: false,
+    hasPendingWrites: false,
+    lastReceivedAt: "-",
+    errorCode: "none",
+    errorMessage: "none"
+  };
+}
 
 function initFirebase() {
   if (isFirebaseInitialized) return db;
@@ -41,25 +59,123 @@ function initFirebase() {
 }
 
 /**
- * 指示書準拠: Firestore onSnapshot リアルタイムストリーム監視
+ * 指示書 1, 6項準拠: includeMetadataChanges: true を持つ端末B診断用 onSnapshot リスナー
  */
 function listenCollection(collectionName, callback) {
   const firestore = initFirebase();
-  if (!firestore) return () => {};
+  const config = getFirebaseConfig();
 
-  return firestore.collection(collectionName).onSnapshot(
-    (snapshot) => {
-      const data = snapshot.docs.map((doc) => ({
-        docId: doc.id,
-        id: doc.id,
-        ...doc.data()
-      }));
-      callback(data);
-    },
-    (error) => {
-      console.error(`Firestore snapshot error for ${collectionName}:`, error);
+  if (window.TERMINAL_B_DEBUG) {
+    window.TERMINAL_B_DEBUG.projectId = config.projectId;
+    window.TERMINAL_B_DEBUG.targetCollection = collectionName;
+    window.TERMINAL_B_DEBUG.snapshotStarted = true;
+  }
+
+  // 指示書 6項: ログ出力
+  console.log("B_SNAPSHOT_STARTED");
+
+  if (!firestore) {
+    if (window.TERMINAL_B_DEBUG) {
+      window.TERMINAL_B_DEBUG.errorCode = "SDK_NOT_LOADED";
+      window.TERMINAL_B_DEBUG.errorMessage = "Firestore SDK not initialized";
     }
-  );
+    return () => {};
+  }
+
+  try {
+    // 指示書 6項: { includeMetadataChanges: true } オプション付与
+    const unsubscribe = firestore.collection(collectionName).onSnapshot(
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        const fromCache = snapshot.metadata ? snapshot.metadata.fromCache : false;
+        const hasPendingWrites = snapshot.metadata ? snapshot.metadata.hasPendingWrites : false;
+
+        if (window.TERMINAL_B_DEBUG) {
+          window.TERMINAL_B_DEBUG.snapshotCount = snapshot.size;
+          window.TERMINAL_B_DEBUG.snapshotReceiveCount++;
+          window.TERMINAL_B_DEBUG.fromCache = fromCache;
+          window.TERMINAL_B_DEBUG.hasPendingWrites = hasPendingWrites;
+          window.TERMINAL_B_DEBUG.lastReceivedAt = new Date().toLocaleTimeString();
+          window.TERMINAL_B_DEBUG.errorCode = "none";
+          window.TERMINAL_B_DEBUG.errorMessage = "none";
+        }
+
+        // 指示書 6項: B_SNAPSHOT_RECEIVED ログ
+        console.log("B_SNAPSHOT_RECEIVED", {
+          count: snapshot.size,
+          fromCache,
+          hasPendingWrites,
+          ids: snapshot.docs.map((doc) => doc.id)
+        });
+
+        const data = snapshot.docs.map((doc) => ({
+          docId: doc.id,
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        callback(data);
+      },
+      (error) => {
+        if (window.TERMINAL_B_DEBUG) {
+          window.TERMINAL_B_DEBUG.errorCode = error.code || "UNKNOWN";
+          window.TERMINAL_B_DEBUG.errorMessage = error.message || String(error);
+        }
+
+        // 指示書 6項: B_SNAPSHOT_ERROR ログ
+        console.error("B_SNAPSHOT_ERROR", {
+          code: error.code,
+          message: error.message
+        });
+      }
+    );
+
+    return unsubscribe;
+  } catch (err) {
+    console.error("B_SNAPSHOT_ERROR", {
+      code: err.code || "unknown",
+      message: err.message
+    });
+    return () => {};
+  }
+}
+
+/**
+ * 指示書 6項: 強制サーバー読込 (getDocsFromServer 相当) ＆ B_SERVER_READ ログ
+ */
+async function fetchServerReadDirect(collectionName = "selections") {
+  const firestore = initFirebase();
+  if (!firestore) return [];
+
+  try {
+    const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
+    
+    const docsData = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      docId: doc.id,
+      ...doc.data()
+    }));
+
+    if (window.TERMINAL_B_DEBUG) {
+      window.TERMINAL_B_DEBUG.serverReadCount = snapshot.size;
+    }
+
+    // 指示書 6項: B_SERVER_READ ログ
+    console.log("B_SERVER_READ", {
+      count: snapshot.size,
+      ids: snapshot.docs.map((doc) => doc.id),
+      data: docsData
+    });
+
+    return docsData;
+  } catch (error) {
+    console.error("B_SERVER_READ_FAILED", error);
+    if (window.TERMINAL_B_DEBUG) {
+      window.TERMINAL_B_DEBUG.errorCode = error.code || "SERVER_READ_ERROR";
+      window.TERMINAL_B_DEBUG.errorMessage = error.message || String(error);
+    }
+    return [];
+  }
 }
 
 /**
@@ -440,6 +556,9 @@ class Store {
   }
 
   initFirestoreSync() {
+    // 指示書 6項: 強制確認としてのサーバー直接取得
+    fetchServerReadDirect('selections');
+
     // 指示書準拠: onSnapshot による全共通コレクションのリアルタイムストリーム監視
     const collectionsToSync = [
       { name: 'selections', field: 'selections' },
@@ -10487,6 +10606,9 @@ class App {
       return;
     }
 
+    // 端末B リアルタイム診断パネルの描画 (指示書 1, 6項)
+    this.renderTerminalBDebugPanel();
+
     // ヘッダー描画
     renderHeader(headerContainer, {
       activeViewTitle: this.getViewTitle(this.currentView),
@@ -10629,6 +10751,36 @@ class App {
       case VIEWS.MASTERS: return 'マスタ管理';
       default: return '選考進捗・ヨミ管理システム';
     }
+  }
+
+  renderTerminalBDebugPanel() {
+    const panel = document.getElementById('terminal-b-debug-panel');
+    if (!panel) return;
+
+    const info = window.TERMINAL_B_DEBUG || {};
+
+    panel.innerHTML = `
+      <div style="background: rgba(15, 23, 42, 0.95); color: #f8fafc; font-family: monospace; font-size: 10px; padding: 10px 14px; border-radius: 8px; border: 1px solid #3b82f6; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 320px; backdrop-filter: blur(4px);">
+        <div style="font-weight: 900; color: #60a5fa; border-bottom: 1px solid #334155; padding-bottom: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+          <span>TERMINAL B DIAGNOSIS PANEL</span>
+          <span style="font-size: 9px; background: #1e293b; padding: 1px 5px; border-radius: 4px; color: #4ade80;">LIVE</span>
+        </div>
+        <div style="line-height: 1.45;">
+          <div><strong style="color:#94a3b8;">Project ID:</strong> ${info.projectId || '-'}</div>
+          <div><strong style="color:#94a3b8;">Database ID:</strong> ${info.databaseId || '(default)'}</div>
+          <div><strong style="color:#94a3b8;">対象コレクション:</strong> ${info.targetCollection || 'selections'}</div>
+          <div><strong style="color:#94a3b8;">getDocsFromServer 取得件数:</strong> <span style="color:#60a5fa; font-weight:bold;">${info.serverReadCount || 0}</span></div>
+          <div><strong style="color:#94a3b8;">onSnapshot 取得件数:</strong> <span style="color:#4ade80; font-weight:bold;">${info.snapshotCount || 0}</span></div>
+          <div><strong style="color:#94a3b8;">onSnapshot開始:</strong> ${info.snapshotStarted ? 'true' : 'false'}</div>
+          <div><strong style="color:#94a3b8;">onSnapshot受信回数:</strong> ${info.snapshotReceiveCount || 0}</div>
+          <div><strong style="color:#94a3b8;">fromCache:</strong> <span style="color:${info.fromCache ? '#facc15' : '#4ade80'};">${info.fromCache ? 'true' : 'false'}</span></div>
+          <div><strong style="color:#94a3b8;">hasPendingWrites:</strong> ${info.hasPendingWrites ? 'true' : 'false'}</div>
+          <div><strong style="color:#94a3b8;">最終受信時刻:</strong> ${info.lastReceivedAt || '-'}</div>
+          <div><strong style="color:#94a3b8;">エラーコード:</strong> <span style="color:${info.errorCode === 'none' ? '#94a3b8' : '#f87171'}; font-weight:bold;">${info.errorCode}</span></div>
+          <div><strong style="color:#94a3b8;">エラーメッセージ:</strong> <span style="color:${info.errorMessage === 'none' ? '#94a3b8' : '#f87171'}; font-weight:bold;">${info.errorMessage}</span></div>
+        </div>
+      </div>
+    `;
   }
 
   renderDebugPanel(rawCount = 0) {

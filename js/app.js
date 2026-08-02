@@ -64,6 +64,9 @@ class App {
       return;
     }
 
+    // 端末B リアルタイム診断パネルの描画 (指示書 1, 6項)
+    this.renderTerminalBDebugPanel();
+
     // ヘッダー描画
     renderHeader(headerContainer, {
       activeViewTitle: this.getViewTitle(this.currentView),
@@ -206,6 +209,36 @@ class App {
       case VIEWS.MASTERS: return 'マスタ管理';
       default: return '選考進捗・ヨミ管理システム';
     }
+  }
+
+  renderTerminalBDebugPanel() {
+    const panel = document.getElementById('terminal-b-debug-panel');
+    if (!panel) return;
+
+    const info = window.TERMINAL_B_DEBUG || {};
+
+    panel.innerHTML = `
+      <div style="background: rgba(15, 23, 42, 0.95); color: #f8fafc; font-family: monospace; font-size: 10px; padding: 10px 14px; border-radius: 8px; border: 1px solid #3b82f6; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 320px; backdrop-filter: blur(4px);">
+        <div style="font-weight: 900; color: #60a5fa; border-bottom: 1px solid #334155; padding-bottom: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+          <span>TERMINAL B DIAGNOSIS PANEL</span>
+          <span style="font-size: 9px; background: #1e293b; padding: 1px 5px; border-radius: 4px; color: #4ade80;">LIVE</span>
+        </div>
+        <div style="line-height: 1.45;">
+          <div><strong style="color:#94a3b8;">Project ID:</strong> ${info.projectId || '-'}</div>
+          <div><strong style="color:#94a3b8;">Database ID:</strong> ${info.databaseId || '(default)'}</div>
+          <div><strong style="color:#94a3b8;">対象コレクション:</strong> ${info.targetCollection || 'selections'}</div>
+          <div><strong style="color:#94a3b8;">getDocsFromServer 取得件数:</strong> <span style="color:#60a5fa; font-weight:bold;">${info.serverReadCount || 0}</span></div>
+          <div><strong style="color:#94a3b8;">onSnapshot 取得件数:</strong> <span style="color:#4ade80; font-weight:bold;">${info.snapshotCount || 0}</span></div>
+          <div><strong style="color:#94a3b8;">onSnapshot開始:</strong> ${info.snapshotStarted ? 'true' : 'false'}</div>
+          <div><strong style="color:#94a3b8;">onSnapshot受信回数:</strong> ${info.snapshotReceiveCount || 0}</div>
+          <div><strong style="color:#94a3b8;">fromCache:</strong> <span style="color:${info.fromCache ? '#facc15' : '#4ade80'};">${info.fromCache ? 'true' : 'false'}</span></div>
+          <div><strong style="color:#94a3b8;">hasPendingWrites:</strong> ${info.hasPendingWrites ? 'true' : 'false'}</div>
+          <div><strong style="color:#94a3b8;">最終受信時刻:</strong> ${info.lastReceivedAt || '-'}</div>
+          <div><strong style="color:#94a3b8;">エラーコード:</strong> <span style="color:${info.errorCode === 'none' ? '#94a3b8' : '#f87171'}; font-weight:bold;">${info.errorCode}</span></div>
+          <div><strong style="color:#94a3b8;">エラーメッセージ:</strong> <span style="color:${info.errorMessage === 'none' ? '#94a3b8' : '#f87171'}; font-weight:bold;">${info.errorMessage}</span></div>
+        </div>
+      </div>
+    `;
   }
 
   renderDebugPanel(rawCount = 0) {

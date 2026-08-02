@@ -15,7 +15,7 @@ import {
   INITIAL_COMPANY_COMMUNICATIONS
 } from './constants.js';
 import { deriveCompanyActionFromSelection } from './utils/kanbanCalculations.js';
-import { initFirebase, listenCollection, saveFirestoreDoc, deleteFirestoreDoc } from './firebase.js';
+import { initFirebase, listenCollection, saveFirestoreDoc, deleteFirestoreDoc, fetchServerReadDirect } from './firebase.js';
 
 const STORAGE_KEYS = {
   CONSULTANTS: 'selection_app_consultants',
@@ -59,6 +59,9 @@ class Store {
   }
 
   initFirestoreSync() {
+    // 指示書 6項: 強制確認としてのサーバー直接取得
+    fetchServerReadDirect('selections');
+
     // 指示書準拠: onSnapshot による全共通コレクションのリアルタイムストリーム監視
     const collectionsToSync = [
       { name: 'selections', field: 'selections' },

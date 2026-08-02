@@ -1,5 +1,5 @@
 /**
- * 選考進捗・ヨミ管理システム - Firebase / Firestore リアルタイム同期モジュール
+ * 選考進捗・ヨミ管理システム - Firebase / 端末B リアルタイム診断モジュール
  */
 
 const getFirebaseConfig = () => {
@@ -17,6 +17,24 @@ const getFirebaseConfig = () => {
 
 let db = null;
 let isFirebaseInitialized = false;
+
+// 端末B 診断用グローバルオブジェクト (指示書 1, 6項)
+if (typeof window !== 'undefined') {
+  window.TERMINAL_B_DEBUG = {
+    projectId: "selection-progress-app",
+    databaseId: "(default)",
+    targetCollection: "selections",
+    serverReadCount: 0,
+    snapshotCount: 0,
+    snapshotStarted: false,
+    snapshotReceiveCount: 0,
+    fromCache: false,
+    hasPendingWrites: false,
+    lastReceivedAt: "-",
+    errorCode: "none",
+    errorMessage: "none"
+  };
+}
 
 export function initFirebase() {
   if (isFirebaseInitialized) return db;
@@ -41,25 +59,123 @@ export function initFirebase() {
 }
 
 /**
- * 指示書準拠: Firestore onSnapshot リアルタイムストリーム監視
+ * 指示書 1, 6項準拠: includeMetadataChanges: true を持つ端末B診断用 onSnapshot リスナー
  */
 export function listenCollection(collectionName, callback) {
   const firestore = initFirebase();
-  if (!firestore) return () => {};
+  const config = getFirebaseConfig();
 
-  return firestore.collection(collectionName).onSnapshot(
-    (snapshot) => {
-      const data = snapshot.docs.map((doc) => ({
-        docId: doc.id,
-        id: doc.id,
-        ...doc.data()
-      }));
-      callback(data);
-    },
-    (error) => {
-      console.error(`Firestore snapshot error for ${collectionName}:`, error);
+  if (window.TERMINAL_B_DEBUG) {
+    window.TERMINAL_B_DEBUG.projectId = config.projectId;
+    window.TERMINAL_B_DEBUG.targetCollection = collectionName;
+    window.TERMINAL_B_DEBUG.snapshotStarted = true;
+  }
+
+  // 指示書 6項: ログ出力
+  console.log("B_SNAPSHOT_STARTED");
+
+  if (!firestore) {
+    if (window.TERMINAL_B_DEBUG) {
+      window.TERMINAL_B_DEBUG.errorCode = "SDK_NOT_LOADED";
+      window.TERMINAL_B_DEBUG.errorMessage = "Firestore SDK not initialized";
     }
-  );
+    return () => {};
+  }
+
+  try {
+    // 指示書 6項: { includeMetadataChanges: true } オプション付与
+    const unsubscribe = firestore.collection(collectionName).onSnapshot(
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        const fromCache = snapshot.metadata ? snapshot.metadata.fromCache : false;
+        const hasPendingWrites = snapshot.metadata ? snapshot.metadata.hasPendingWrites : false;
+
+        if (window.TERMINAL_B_DEBUG) {
+          window.TERMINAL_B_DEBUG.snapshotCount = snapshot.size;
+          window.TERMINAL_B_DEBUG.snapshotReceiveCount++;
+          window.TERMINAL_B_DEBUG.fromCache = fromCache;
+          window.TERMINAL_B_DEBUG.hasPendingWrites = hasPendingWrites;
+          window.TERMINAL_B_DEBUG.lastReceivedAt = new Date().toLocaleTimeString();
+          window.TERMINAL_B_DEBUG.errorCode = "none";
+          window.TERMINAL_B_DEBUG.errorMessage = "none";
+        }
+
+        // 指示書 6項: B_SNAPSHOT_RECEIVED ログ
+        console.log("B_SNAPSHOT_RECEIVED", {
+          count: snapshot.size,
+          fromCache,
+          hasPendingWrites,
+          ids: snapshot.docs.map((doc) => doc.id)
+        });
+
+        const data = snapshot.docs.map((doc) => ({
+          docId: doc.id,
+          id: doc.id,
+          ...doc.data()
+        }));
+
+        callback(data);
+      },
+      (error) => {
+        if (window.TERMINAL_B_DEBUG) {
+          window.TERMINAL_B_DEBUG.errorCode = error.code || "UNKNOWN";
+          window.TERMINAL_B_DEBUG.errorMessage = error.message || String(error);
+        }
+
+        // 指示書 6項: B_SNAPSHOT_ERROR ログ
+        console.error("B_SNAPSHOT_ERROR", {
+          code: error.code,
+          message: error.message
+        });
+      }
+    );
+
+    return unsubscribe;
+  } catch (err) {
+    console.error("B_SNAPSHOT_ERROR", {
+      code: err.code || "unknown",
+      message: err.message
+    });
+    return () => {};
+  }
+}
+
+/**
+ * 指示書 6項: 強制サーバー読込 (getDocsFromServer 相当) ＆ B_SERVER_READ ログ
+ */
+export async function fetchServerReadDirect(collectionName = "selections") {
+  const firestore = initFirebase();
+  if (!firestore) return [];
+
+  try {
+    const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
+    
+    const docsData = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      docId: doc.id,
+      ...doc.data()
+    }));
+
+    if (window.TERMINAL_B_DEBUG) {
+      window.TERMINAL_B_DEBUG.serverReadCount = snapshot.size;
+    }
+
+    // 指示書 6項: B_SERVER_READ ログ
+    console.log("B_SERVER_READ", {
+      count: snapshot.size,
+      ids: snapshot.docs.map((doc) => doc.id),
+      data: docsData
+    });
+
+    return docsData;
+  } catch (error) {
+    console.error("B_SERVER_READ_FAILED", error);
+    if (window.TERMINAL_B_DEBUG) {
+      window.TERMINAL_B_DEBUG.errorCode = error.code || "SERVER_READ_ERROR";
+      window.TERMINAL_B_DEBUG.errorMessage = error.message || String(error);
+    }
+    return [];
+  }
 }
 
 /**
