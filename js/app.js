@@ -64,25 +64,6 @@ class App {
       return;
     }
 
-    // 指示書 6, 8項: 画面描画直前の一時共有データ ＆ フィルターデバッグログ
-    const sharedSelections = store.getSelections();
-    console.log("RENDER_SHARED_DATA", {
-      itemCount: sharedSelections.length,
-      items: sharedSelections
-    });
-
-    console.log("DISPLAY_FILTER_DEBUG", {
-      rawCount: sharedSelections.length,
-      filteredCount: sharedSelections.length,
-      selectedConsultant: "ALL",
-      selectedPeriod: "ALL",
-      selectedJob: "ALL",
-      selectedStatus: "ALL"
-    });
-
-    // 指示書 1, 8, 9項: リアルタイム DATA SOURCE DEBUG 診断パネルの描画
-    this.renderDebugPanel(sharedSelections.length);
-
     // ヘッダー描画
     renderHeader(headerContainer, {
       activeViewTitle: this.getViewTitle(this.currentView),
@@ -99,102 +80,6 @@ class App {
 
     // メインコンテンツ描画
     contentContainer.innerHTML = '';
-
-    // 指示書 5, 6項: 一時操作バー ＆ データ移行ボタン
-    if (this.currentView !== 'syncDiagnostic') {
-      const bar = document.createElement('div');
-      bar.className = 'mb-4 p-3 bg-slate-900 text-white rounded-lg shadow border border-indigo-500/30 flex flex-wrap items-center justify-between gap-2 text-xs font-mono';
-      bar.innerHTML = `
-        <div class="flex items-center space-x-2">
-          <button id="btn-seed-to-firestore" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
-            <span>🌱 共通データをFirestoreに一括初期投入</span>
-          </button>
-          <button id="btn-migrate-to-firestore" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
-            <span>🚀 端末内データをFirestoreへ移行</span>
-          </button>
-          <button id="btn-force-server-reload" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded shadow transition-all flex items-center space-x-1">
-            <span>⚡ Firestoreサーバーから再読込</span>
-          </button>
-          <a href="#sync-diagnostic" class="text-blue-400 hover:underline font-bold">🧪 診断画面 (/sync-diagnostic) を開く</a>
-        </div>
-        <div id="direct-fetch-status" class="text-slate-300 font-sans">
-          ${this.directFetchResult ? `
-            <span class="text-emerald-400 font-bold">取得元: ${this.directFetchResult.loadedFrom}</span> | 
-            <span>件数: <strong>${this.directFetchResult.count}</strong></span> | 
-            <span>取得時刻: ${this.directFetchResult.loadedAt}</span>
-          ` : '※ Firestore サーバーが唯一の正本です'}
-        </div>
-      `;
-
-      // 🌱 一括初期シードボタンの処理
-      bar.querySelector('#btn-seed-to-firestore').addEventListener('click', async () => {
-        const btn = bar.querySelector('#btn-seed-to-firestore');
-        if (!confirm('標準の共通データ（全選考案件・企業・求人・候補者等）を Firestore サーバーへ直接一括投入しますか？')) return;
-
-        btn.disabled = true;
-        btn.innerText = '投入中...';
-
-        try {
-          const res = await seedAllInitialDataToFirestore((current, total, col) => {
-            btn.innerText = `投入中... (${current}/${total}件)`;
-          });
-
-          alert(`Firestore サーバーへの一括初期データ投入が完了しました！\n\n- 選考案件: ${res.selections || 0}件\n- 企業: ${res.companies || 0}件\n- 求人: ${res.jobs || 0}件\n- 候補者: ${res.candidates || 0}件\n\nプライベートモードまたは別端末でリロードして同じデータが表示されることを確認してください。`);
-          this.render();
-        } catch (err) {
-          alert('投入に失敗しました: ' + err.message);
-        } finally {
-          btn.disabled = false;
-          btn.innerText = '🌱 共通データをFirestoreに一括初期投入';
-        }
-      });
-
-      // 指示書 5項: 一括データ移行ボタンの処理 (進捗表示・安全タイムアウト対応)
-      bar.querySelector('#btn-migrate-to-firestore').addEventListener('click', async () => {
-        const btn = bar.querySelector('#btn-migrate-to-firestore');
-        if (!confirm('この端末（localStorage）にある既存データを Firestore サーバーへ一括移行しますか？')) return;
-
-        btn.disabled = true;
-        btn.innerText = '準備中...';
-
-        try {
-          // localStorage 内の全キーのデータを収集
-          const dataPackage = {
-            selections: JSON.parse(localStorage.getItem('selection_app_selections') || '[]'),
-            companies: JSON.parse(localStorage.getItem('selection_app_companies') || '[]'),
-            jobs: JSON.parse(localStorage.getItem('selection_app_jobs') || '[]'),
-            candidates: JSON.parse(localStorage.getItem('selection_app_candidates') || '[]'),
-            consultants: JSON.parse(localStorage.getItem('selection_app_consultants') || '[]'),
-            qTargets: JSON.parse(localStorage.getItem('selection_app_q_targets') || '[]'),
-            histories: JSON.parse(localStorage.getItem('selection_app_histories') || '[]')
-          };
-
-          const res = await migrateLocalDataToFirestore(dataPackage, (current, total) => {
-            btn.innerText = `移行中... (${current}/${total}件)`;
-          });
-
-          alert(`Firestore へのデータ移行が完了しました！\n\n- 選考案件: ${res.selections}件\n- 企業: ${res.companies}件\n- 求人: ${res.jobs}件\n- 候補者: ${res.candidates}件\n- コンサルタント: ${res.consultants}件\n\nプライベートモードまたは別端末でリロードして同じデータが表示されることを確認してください。`);
-          this.render();
-        } catch (err) {
-          alert('移行に失敗しました: ' + err.message);
-        } finally {
-          btn.disabled = false;
-          btn.innerText = '🚀 この端末のデータをFirestoreへ移行';
-        }
-      });
-
-      bar.querySelector('#btn-force-server-reload').addEventListener('click', async () => {
-        const btn = bar.querySelector('#btn-force-server-reload');
-        btn.disabled = true;
-        btn.innerText = '取得中...';
-        const res = await fetchSelectionsFromServerDirect('selections');
-        this.directFetchResult = res;
-        this.render();
-      });
-
-      contentContainer.appendChild(bar);
-    }
-
     const viewContainer = document.createElement('div');
     contentContainer.appendChild(viewContainer);
 

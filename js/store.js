@@ -15,7 +15,7 @@ import {
   INITIAL_COMPANY_COMMUNICATIONS
 } from './constants.js';
 import { deriveCompanyActionFromSelection } from './utils/kanbanCalculations.js';
-import { initFirebase, subscribeCollection, saveDocument, deleteDocument } from './firebase.js';
+import { initFirebase, listenCollection, saveFirestoreDoc, deleteFirestoreDoc } from './firebase.js';
 
 const STORAGE_KEYS = {
   CONSULTANTS: 'selection_app_consultants',
@@ -40,10 +40,10 @@ const STORAGE_KEYS = {
 class Store {
   constructor() {
     this.listeners = [];
-    this.isLoading = true; // 指示書 1項: ローディング状態制御
+    this.isLoading = true; // 読み込み完了前の表示制御
     this.firestoreSyncedCollections = new Set();
     
-    // 指示書 2, 3項: 業務データの唯一の正本はメモリ state (this.data)
+    // 指示書準拠: 共通業務データの唯一の正本はメモリ state (this.data)
     this.data = {
       selections: [],
       companies: [],
@@ -59,7 +59,7 @@ class Store {
   }
 
   initFirestoreSync() {
-    // 指示書 3, 7項: Firestore サーバーからの監視と反映
+    // 指示書準拠: onSnapshot による全共通コレクションのリアルタイムストリーム監視
     const collectionsToSync = [
       { name: 'selections', field: 'selections' },
       { name: 'companies', field: 'companies' },
@@ -72,37 +72,20 @@ class Store {
     ];
 
     collectionsToSync.forEach(({ name, field }) => {
-      subscribeCollection(
-        name,
-        (items) => {
-          const validItems = Array.isArray(items) ? items : [];
+      listenCollection(name, (items) => {
+        const validItems = Array.isArray(items) ? items : [];
 
-          // 指示書 7項: SHARED_DATA_STATE_UPDATED ログ (Firestore 正本からの直接反映)
-          console.log("SHARED_DATA_STATE_UPDATED", {
-            source: "Firestore",
-            collectionName: name,
-            count: validItems.length,
-            data: validItems
-          });
-
-          // 指示書 2, 3項: localStorage やキャッシュは使用せず、state にそのまま反映
-          this.data[field] = validItems;
-
-          this.firestoreSyncedCollections.add(name);
-          
-          // 初回データ受信が完了したらローディング解除 (指示書 1, 6項)
-          if (this.firestoreSyncedCollections.size >= 4) {
-            this.isLoading = false;
-          }
-
-          this.notify();
-        },
-        (error) => {
-          console.warn(`Firestore sync error for ${name}:`, error);
+        // 指示書準拠: onSnapshot からの全件データを直接 state へストリーム反映
+        this.data[field] = validItems;
+        this.firestoreSyncedCollections.add(name);
+        
+        // 初回読み込み完了判定
+        if (this.firestoreSyncedCollections.size >= 4) {
           this.isLoading = false;
-          this.notify();
         }
-      );
+
+        this.notify();
+      });
     });
   }
 
@@ -341,6 +324,47 @@ class Store {
 
   notify() {
     this.listeners.forEach(l => l());
+  }
+
+  setItem(key, data) {
+    const keyToCollection = {
+      [STORAGE_KEYS.SELECTIONS]: 'selections',
+      [STORAGE_KEYS.COMPANIES]: 'companies',
+      [STORAGE_KEYS.JOBS]: 'jobs',
+      [STORAGE_KEYS.CANDIDATES]: 'candidates',
+      [STORAGE_KEYS.CONSULTANTS]: 'consultants',
+      [STORAGE_KEYS.Q_TARGETS]: 'qTargets',
+      [STORAGE_KEYS.HISTORIES]: 'histories',
+      [STORAGE_KEYS.COMPANY_COMMUNICATIONS]: 'companyCommunications'
+    };
+
+    const collectionName = keyToCollection[key];
+    if (collectionName && Array.isArray(data)) {
+      data.forEach(item => {
+        const docId = item.selectionId || item.companyId || item.jobId || item.candidateId || item.consultantId || item.targetId || item.id || item.historyId;
+        if (docId) {
+          saveFirestoreDoc(collectionName, String(docId), item).catch(err => {
+            console.error(`Firestore save failed for ${collectionName}/${docId}:`, err);
+          });
+        }
+      });
+    }
+
+    const keyToField = {
+      [STORAGE_KEYS.SELECTIONS]: 'selections',
+      [STORAGE_KEYS.COMPANIES]: 'companies',
+      [STORAGE_KEYS.JOBS]: 'jobs',
+      [STORAGE_KEYS.CANDIDATES]: 'candidates',
+      [STORAGE_KEYS.CONSULTANTS]: 'consultants',
+      [STORAGE_KEYS.Q_TARGETS]: 'qTargets',
+      [STORAGE_KEYS.HISTORIES]: 'histories',
+      [STORAGE_KEYS.COMPANY_COMMUNICATIONS]: 'companyCommunications'
+    };
+    if (keyToField[key]) {
+      this.data[keyToField[key]] = data;
+    }
+
+    this.notify();
   }
 
   // --- 操作アカウント & 権限設定 ---
@@ -1397,6 +1421,21 @@ class Store {
     const jobs = this.getItem(STORAGE_KEYS.JOBS).filter(j => !isDemoItem(j));
     const companies = this.getItem(STORAGE_KEYS.COMPANIES).filter(c => !isDemoItem(c));
     const qTargets = this.getItem(STORAGE_KEYS.Q_TARGETS).filter(q => !isDemoItem(q));
+
+    // 削除対象の Firestore ドキュメント物理消去
+    const itemsToDelete = [
+      ...this.getItem(STORAGE_KEYS.HISTORIES).filter(h => isDemoItem(h) || demoSelectionIds.has(h.selectionId)).map(i => ({ col: 'histories', id: i.historyId })),
+      ...this.getItem(STORAGE_KEYS.COMPANY_COMMUNICATIONS).filter(c => isDemoItem(c) || demoSelectionIds.has(c.selectionId)).map(i => ({ col: 'companyCommunications', id: i.id })),
+      ...demoSelections.map(i => ({ col: 'selections', id: i.selectionId })),
+      ...this.getItem(STORAGE_KEYS.CANDIDATES).filter(isDemoItem).map(i => ({ col: 'candidates', id: i.candidateId })),
+      ...this.getItem(STORAGE_KEYS.JOBS).filter(isDemoItem).map(i => ({ col: 'jobs', id: i.jobId })),
+      ...this.getItem(STORAGE_KEYS.COMPANIES).filter(isDemoItem).map(i => ({ col: 'companies', id: i.companyId })),
+      ...this.getItem(STORAGE_KEYS.Q_TARGETS).filter(isDemoItem).map(i => ({ col: 'qTargets', id: i.targetId }))
+    ];
+
+    itemsToDelete.forEach(item => {
+      if (item.id) deleteFirestoreDoc(item.col, item.id);
+    });
 
     this.setItem(STORAGE_KEYS.HISTORIES, histories);
     this.setItem(STORAGE_KEYS.COMPANY_COMMUNICATIONS, comms);
