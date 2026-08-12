@@ -565,10 +565,7 @@ function renderCaCardHTML(s, isHighlighted, isCompanyAxis) {
         <div class="font-bold text-indigo-800 truncate">${s.phase} <span class="text-slate-400 font-normal">｜ ${s.progressStatus}</span></div>
         <div class="font-black text-slate-900 shrink-0 ml-1">ヨミ ${percentStr}</div>
       </div>
-    </div>
   `;
-}
-
 }
 
 /**
