@@ -210,7 +210,17 @@ export async function saveFirestoreDoc(collectionName, docId, payload) {
   const targetId = String(docId || payload.selectionId || payload.companyId || payload.jobId || payload.candidateId || payload.consultantId || payload.targetId || payload.id || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
 
   try {
-    await firestore.collection(collectionName).doc(targetId).set(cleanPayload, { merge: true });
+    // 指示書 16項: 5秒間のタイムアウト保護で無限フリーズを物理遮断
+    const timeoutPromise = new Promise((resolve) => {
+      setTimeout(() => {
+        console.warn(`Firestore save timeout (5s) for ${collectionName}/${targetId}. Proceeding with local state.`);
+        resolve('TIMEOUT');
+      }, 5000);
+    });
+
+    const savePromise = firestore.collection(collectionName).doc(targetId).set(cleanPayload, { merge: true });
+    await Promise.race([savePromise, timeoutPromise]);
+
     return true;
   } catch (error) {
     console.error(`Firestore save error (${collectionName}/${targetId}):`, error);

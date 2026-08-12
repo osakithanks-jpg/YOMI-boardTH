@@ -470,28 +470,33 @@ export function openSelectionDetailModal(selectionId, onClose) {
       companyActionSource: actionSourceState
     };
 
-    // 指示書 5項: SAVE_SELECTION_PAYLOAD ログ出力
-    console.log("SAVE_SELECTION_PAYLOAD", {
-      selectionId,
-      ...payload
-    });
+    // 指示書 3, 4, 5, 12, 19, 22項: [SAVE] 1 start ＆ 2 payload ready
+    console.log("[SAVE] 1 start", { selectionId });
+    console.log("[SAVE] 2 payload ready", payload);
 
-    // 指示書 19項: 二重保存防止
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中...';
 
+    let isSuccess = false;
     try {
-      // 指示書 18項: Firestore 保存完了を await 待ち
-      await store.updateSelection(selectionId, payload, '詳細モーダルからの保存', saveOptions);
-      
-      modalEl.remove();
-      if (onClose) onClose();
+      // 指示書 7, 8, 9項: selection 本体の非同期保存を実行
+      isSuccess = await store.updateSelection(selectionId, payload, '詳細モーダルからの保存', saveOptions);
+      if (isSuccess) {
+        console.log("[SAVE] 9 completed");
+      }
     } catch (err) {
-      console.error("Selection update error:", err);
+      console.error("[SAVE] FAILED", err);
+      // 指示書 5項: 保存失敗メッセージ
+      alert('保存に失敗しました。\nもう一度お試しください。');
+    } finally {
+      // 指示書 4項: 成功・失敗にかかわらず必ず保存中状態を解除
       saveBtn.disabled = false;
       saveBtn.textContent = '変更を保存する';
-      // 指示書 11項: 保存失敗時メッセージ
-      alert('保存に失敗しました。\nデータは更新されていません。');
+
+      if (isSuccess) {
+        modalEl.remove();
+        if (onClose) onClose();
+      }
     }
   });
 

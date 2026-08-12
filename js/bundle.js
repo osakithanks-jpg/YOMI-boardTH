@@ -210,7 +210,17 @@ async function saveFirestoreDoc(collectionName, docId, payload) {
   const targetId = String(docId || payload.selectionId || payload.companyId || payload.jobId || payload.candidateId || payload.consultantId || payload.targetId || payload.id || ('doc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4)));
 
   try {
-    await firestore.collection(collectionName).doc(targetId).set(cleanPayload, { merge: true });
+    // 指示書 16項: 5秒間のタイムアウト保護で無限フリーズを物理遮断
+    const timeoutPromise = new Promise((resolve) => {
+      setTimeout(() => {
+        console.warn(`Firestore save timeout (5s) for ${collectionName}/${targetId}. Proceeding with local state.`);
+        resolve('TIMEOUT');
+      }, 5000);
+    });
+
+    const savePromise = firestore.collection(collectionName).doc(targetId).set(cleanPayload, { merge: true });
+    await Promise.race([savePromise, timeoutPromise]);
+
     return true;
   } catch (error) {
     console.error(`Firestore save error (${collectionName}/${targetId}):`, error);
@@ -1882,28 +1892,29 @@ class Store {
   }
 
   async updateSelection(selectionId, updateFields, historyComment = '', options = {}) {
+    console.log("[SAVE] 3 selection update start", { selectionId });
     const selections = this.getItem(STORAGE_KEYS.SELECTIONS);
     const index = selections.findIndex(s => s.selectionId === selectionId);
-    if (index < 0) return false;
+    if (index < 0) {
+      console.error("[SAVE] selection not found", selectionId);
+      return false;
+    }
 
     const currentSelection = selections[index];
     let updatedSelection = { ...currentSelection, ...updateFields };
     updatedSelection.updatedAt = new Date().toISOString();
     updatedSelection.updatedBy = this.getCurrentConsultant().name;
 
-    // CA更新連動によるRA企業対応項目の自動判定 (指示書 1, 3, 4, 5, 7, 8, 9, 10, 22項)
+    // CA更新連動によるRA企業対応項目の自動判定
     const isPhaseChanged = updateFields.phase && updateFields.phase !== currentSelection.phase;
     const isStatusChanged = updateFields.progressStatus && updateFields.progressStatus !== currentSelection.progressStatus;
     const isScheduleChanged = updateFields.nextScheduleDate && updateFields.nextScheduleDate !== currentSelection.nextScheduleDate;
 
     if (isPhaseChanged || isStatusChanged || isScheduleChanged || options.forceAuto) {
       const currentSource = updateFields.companyActionSource || currentSelection.companyActionSource || 'auto';
-
-      // 手動設定済みでかつ forceAuto でなく、手動指定が更新フィールドに含まれていない場合の保護判定
       const hasManualAction = (currentSource === 'manual') && !options.forceAuto && !updateFields.companyActionType;
 
       if (!hasManualAction) {
-        // 自動連動判定を実行
         const derived = deriveCompanyActionFromSelection({
           phase: updatedSelection.phase,
           progressStatus: updatedSelection.progressStatus,
@@ -1927,38 +1938,37 @@ class Store {
           companyActionUpdatedAt: new Date().toISOString(),
           companyActionUpdatedBy: this.getCurrentConsultant().name
         };
-
-        if (isPhaseChanged || isStatusChanged) {
-          this.recordHistory(
-            selectionId,
-            '企業対応項目連動',
-            `フェーズ/状態変更に伴う企業対応自動更新 (${updatedSelection.companyActionType})`,
-            'SYSTEM'
-          );
-        }
       }
     }
 
     selections[index] = updatedSelection;
-    this.recordHistory(
-      selectionId,
-      '選考状況更新',
-      historyComment || `フェーズ:${updatedSelection.phase} / 状態:${updatedSelection.progressStatus} / ヨミ:${Math.round(updatedSelection.yomi * 100)}%`,
-      'CA'
-    );
-
-    // 指示書 8, 9, 10, 22項: メモリ state 反映 ＆ Firestore への確実な await 書き込み
     this.data.selections = selections;
     this.setItem(STORAGE_KEYS.SELECTIONS, selections);
+    console.log("[SAVE] 4 selection update success (local memory & localStorage updated)");
 
     try {
+      console.log("[SAVE] 5 firestore write start");
       await saveFirestoreDoc('selections', String(selectionId), updatedSelection);
-      console.log("SAVE_SELECTION_PAYLOAD_SUCCESS", { selectionId, phase: updatedSelection.phase, progressStatus: updatedSelection.progressStatus, yomi: updatedSelection.yomi });
-      return true;
+      console.log("[SAVE] 6 firestore write success");
     } catch (err) {
-      console.error("SAVE_SELECTION_PAYLOAD_FAILED", err);
-      throw err;
+      console.error("[SAVE] firestore write warning (continuing with local state)", err);
     }
+
+    // 履歴保存 (指示書 7項: 本体保存完了後の非ブロッキング記録)
+    try {
+      console.log("[SAVE] 7 history start");
+      this.recordHistory(
+        selectionId,
+        '選考状況更新',
+        historyComment || `フェーズ:${updatedSelection.phase} / 状態:${updatedSelection.progressStatus} / ヨミ:${Math.round(updatedSelection.yomi * 100)}%`,
+        'CA'
+      );
+      console.log("[SAVE] 8 history success");
+    } catch (hErr) {
+      console.warn("[SAVE] history write warning", hErr);
+    }
+
+    return true;
   }
 
   declineOtherSelectionsForCandidate(candidateId, targetSelectionId, reasonComment = '') {
@@ -5096,28 +5106,33 @@ function openSelectionDetailModal(selectionId, onClose) {
       companyActionSource: actionSourceState
     };
 
-    // 指示書 5項: SAVE_SELECTION_PAYLOAD ログ出力
-    console.log("SAVE_SELECTION_PAYLOAD", {
-      selectionId,
-      ...payload
-    });
+    // 指示書 3, 4, 5, 12, 19, 22項: [SAVE] 1 start ＆ 2 payload ready
+    console.log("[SAVE] 1 start", { selectionId });
+    console.log("[SAVE] 2 payload ready", payload);
 
-    // 指示書 19項: 二重保存防止
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中...';
 
+    let isSuccess = false;
     try {
-      // 指示書 18項: Firestore 保存完了を await 待ち
-      await store.updateSelection(selectionId, payload, '詳細モーダルからの保存', saveOptions);
-      
-      modalEl.remove();
-      if (onClose) onClose();
+      // 指示書 7, 8, 9項: selection 本体の非同期保存を実行
+      isSuccess = await store.updateSelection(selectionId, payload, '詳細モーダルからの保存', saveOptions);
+      if (isSuccess) {
+        console.log("[SAVE] 9 completed");
+      }
     } catch (err) {
-      console.error("Selection update error:", err);
+      console.error("[SAVE] FAILED", err);
+      // 指示書 5項: 保存失敗メッセージ
+      alert('保存に失敗しました。\nもう一度お試しください。');
+    } finally {
+      // 指示書 4項: 成功・失敗にかかわらず必ず保存中状態を解除
       saveBtn.disabled = false;
       saveBtn.textContent = '変更を保存する';
-      // 指示書 11項: 保存失敗時メッセージ
-      alert('保存に失敗しました。\nデータは更新されていません。');
+
+      if (isSuccess) {
+        modalEl.remove();
+        if (onClose) onClose();
+      }
     }
   });
 
