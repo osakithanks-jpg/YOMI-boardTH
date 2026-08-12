@@ -129,7 +129,9 @@ class App {
             openSelectionDetailModal(selectionId, () => this.render());
           },
           onNavigateToCompanyActions: (filterUrgencyCode) => {
-            this.navigateTo(VIEWS.COMPANY_ACTIONS, { filterUrgencyCode });
+            this.currentView = VIEWS.COMPANY_ACTIONS;
+            this.viewFilters = { filterUrgencyCode };
+            this.render();
           }
         });
         break;
