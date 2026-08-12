@@ -35,9 +35,9 @@ foreach ($f in $files) {
         $text = [System.IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)
         # remove import statements safely
         $text = [System.Text.RegularExpressions.Regex]::Replace($text, "(?s)import\s*(?:\{[^}]*\}|\*\s*as\s+\w+|\w+)\s*from\s*['""][^'""]+['""];?", "")
-        # remove export keywords
+        # remove export keywords without removing async keyword
         $text = [System.Text.RegularExpressions.Regex]::Replace($text, "(?m)^export\s+default\s+", "")
-        $text = [System.Text.RegularExpressions.Regex]::Replace($text, "(?m)^export\s+(?:async\s+)?", "")
+        $text = [System.Text.RegularExpressions.Regex]::Replace($text, "(?m)^export\s+", "")
         $combined += $text + "`n`n"
     }
 }
