@@ -5095,7 +5095,8 @@ function openSelectionDetailModal(selectionId, onClose) {
 
 
 /**
- * 選考進捗・ヨミ管理システム - ホワイトボード画面コンポーネント (「レベル」表記廃止・5区分フェーズ表示・上部本日のRA対応表示 & ドロップ時フェーズ選択ダイアログ対応)
+ * 選考進捗・ヨミ管理システム - ホワイトボード画面コンポーネント (クリーン再構築版)
+ * 指示書 (全36項) に準拠し、データ層・詳細モーダルは保持のままUI表示のみを堅牢に一新
  */
 
 
@@ -5103,7 +5104,7 @@ function openSelectionDetailModal(selectionId, onClose) {
 
 
 
-const KANBAN_STORAGE_KEY = 'kanban_view_active_state';
+const KANBAN_STORAGE_KEY = 'kanban_view_active_state_v3';
 
 function getSavedKanbanState() {
   try {
@@ -5124,13 +5125,8 @@ function saveKanbanState(state) {
 function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions }) {
   const savedState = getSavedKanbanState();
 
-  // 表示モード (指示書 3項: 初期表示は 'ca' (CA別))
-  let selectedAxisMode = savedState.axisMode || 'ca'; // 'ca' | 'company'
-
-  // 上部RA対応欄の折りたたみ状態 (指示書 19項: 初期状態はコンパクト)
+  let selectedAxisMode = savedState.axisMode || 'ca';
   let isRaAreaOpen = savedState.isRaAreaOpen !== undefined ? savedState.isRaAreaOpen : true;
-
-  // フィルター
   let searchKeyword = savedState.searchKeyword || '';
   let filterCaId = savedState.filterCaId || '';
   let filterCompanySearch = savedState.filterCompanySearch || '';
@@ -5140,11 +5136,11 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
     const savedScrollLeft = options.preserveScroll !== false ? (savedState.scrollLeft || 0) : 0;
 
-    const selections = store.getSelections();
-    const companies = store.getCompanies();
-    const jobs = store.getJobs();
-    const candidates = store.getCandidates();
-    const consultants = store.getConsultants();
+    const selections = store.getSelections() || [];
+    const companies = store.getCompanies() || [];
+    const jobs = store.getJobs() || [];
+    const candidates = store.getCandidates() || [];
+    const consultants = store.getConsultants() || [];
 
     const companiesMap = new Map(companies.map(c => [c.companyId, c]));
     const candidatesMap = new Map(candidates.map(c => [c.candidateId, c]));
@@ -5154,11 +5150,12 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // 書類・面接見送りなどの「選考終了」案件はホワイトボードから非表示 (指示書 24項)
-    // 「内定辞退」案件は下部ホワイトボードに残す (グレーアウト)
-    const activeSelections = selections.filter(s => !s.isArchived && s.phase !== '選考終了');
+    const activeSelections = selections.filter(s => {
+      if (!s || s.isArchived) return false;
+      const p = s.phase || '';
+      return p !== '選考終了' && p !== '書類見送り' && p !== '面接見送り' && p !== '候補者辞退' && p !== '他社決定';
+    });
 
-    // データ補完
     const enrichedSelections = activeSelections.map(s => {
       const comp = companiesMap.get(s.companyId);
       const cand = candidatesMap.get(s.candidateId);
@@ -5167,8 +5164,6 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
       const ra = consultantsMap.get(s.raId || s.raConsultantId);
 
       const wbGroup = getWhiteboardPhaseGroup(s.phase);
-      const actionInfo = autoDetectNextAction(s);
-      const elapsedInfo = calculateElapsedTime(s, today);
       const urgencyInfo = calculateUrgency(s, today);
 
       return {
@@ -5179,78 +5174,58 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
         jobObj: job,
         caObj: ca,
         raObj: ra,
-        nextActionText: s.nextAction || actionInfo.action,
-        elapsedInfo,
         urgencyInfo
       };
     });
 
-    // 「本日のRA対応」サマリー件数算出 (指示書 14, 18項)
     const raActionSelections = enrichedSelections.filter(s => {
       if (s.phase === '内定辞退') return false;
-      const uCode = s.urgencyInfo.code;
+      const uCode = s.urgencyInfo ? s.urgencyInfo.code : '';
       return (uCode === 'expired' || uCode === 'today' || uCode === 'waiting_reply' || uCode === 'ca_check' || uCode === 'within_3days');
     });
 
     const raSummary = {
       total: raActionSelections.length,
-      expired: raActionSelections.filter(s => s.urgencyInfo.code === 'expired').length,
-      today: raActionSelections.filter(s => s.urgencyInfo.code === 'today').length,
-      companyWaiting: raActionSelections.filter(s => s.currentBall === 'COMPANY' || s.companyActionStatus === '企業回答待ち' || s.urgencyInfo.code === 'waiting_reply').length,
-      caCheck: raActionSelections.filter(s => s.companyActionStatus === 'CA確認待ち' || s.urgencyInfo.code === 'ca_check').length
+      expired: raActionSelections.filter(s => s.urgencyInfo && s.urgencyInfo.code === 'expired').length,
+      today: raActionSelections.filter(s => s.urgencyInfo && s.urgencyInfo.code === 'today').length,
+      companyWaiting: raActionSelections.filter(s => s.currentBall === 'COMPANY' || s.companyActionStatus === '企業回答待ち' || (s.urgencyInfo && s.urgencyInfo.code === 'waiting_reply')).length,
+      caCheck: raActionSelections.filter(s => s.companyActionStatus === 'CA確認待ち' || (s.urgencyInfo && s.urgencyInfo.code === 'ca_check')).length
     };
 
-    // 下部ホワイトボードのカラム構成 (指示書 4, 5, 6, 7, 12項)
     let columns = [];
     if (selectedAxisMode === 'ca') {
-      // 全CAを表示 (指示書 4, 5項: 登録されている全CAを網羅)
       let targetCas = consultants.filter(c => {
-        if (c.isArchived || c.status === 'inactive') return false;
+        if (!c || c.isArchived || c.status === 'inactive') return false;
         if (c.roles && Array.isArray(c.roles)) return c.roles.includes('CA') || c.roles.includes('ADMIN');
         return c.roleType === 'CA' || c.roleType === 'ADMIN' || !c.roleType;
       });
-
-      // もしCA登録リストが空の場合のフォールバック
-      if (targetCas.length === 0) {
-        targetCas = consultants;
-      }
-
-      if (filterCaId) {
-        targetCas = targetCas.filter(c => c.consultantId === filterCaId);
-      }
-
+      if (targetCas.length === 0) targetCas = consultants;
+      if (filterCaId) targetCas = targetCas.filter(c => c.consultantId === filterCaId);
       if (searchKeyword) {
         const kw = searchKeyword.toLowerCase();
-        targetCas = targetCas.filter(c => c.name.toLowerCase().includes(kw));
+        targetCas = targetCas.filter(c => (c.name || '').toLowerCase().includes(kw));
       }
-
       const registeredCaIds = new Set(targetCas.map(c => c.consultantId));
-
       columns = targetCas.map(c => ({
         id: c.consultantId,
         title: `${c.name} (CA)`,
-        filterFn: (s) => (s.caId && s.caId === c.consultantId) || (s.caConsultantId && s.caConsultantId === c.consultantId) || (s.caName && s.caName.includes(c.name.split(' ')[0]))
+        filterFn: (s) => (s.caId && s.caId === c.consultantId) || (s.caConsultantId && s.caConsultantId === c.consultantId) || (s.caName && s.caName.includes((c.name || '').split(' ')[0]))
       }));
-
-      // caId が未割り当ての案件が存在する場合の救済用「担当CA未設定」列 (指示書 12項)
-      const hasUnassignedCa = enrichedSelections.some(s => !s.caId && !s.caConsultantId && !registeredCaIds.has(s.caId));
+      const hasUnassignedCa = enrichedSelections.some(s => !s.caId && !s.caConsultantId && (!s.caName || !registeredCaIds.has(s.caId)));
       if (hasUnassignedCa) {
         columns.push({
           id: 'UNASSIGNED_CA',
           title: '担当CA未設定',
-          filterFn: (s) => !s.caId || !registeredCaIds.has(s.caId)
+          filterFn: (s) => !s.caId && !s.caConsultantId
         });
       }
     } else {
-      // 企業別表示 (指示書 6, 7項: 現在進行中の選考案件が1件以上ある企業のみ抽出)
       const activeCompanyIds = new Set(enrichedSelections.filter(s => s.phase !== '内定辞退').map(s => s.companyId));
-      let targetCompanies = companies.filter(c => activeCompanyIds.has(c.companyId));
-
+      let targetCompanies = companies.filter(c => c && activeCompanyIds.has(c.companyId));
       if (filterCompanySearch) {
         const kw = filterCompanySearch.toLowerCase();
-        targetCompanies = targetCompanies.filter(c => c.name.toLowerCase().includes(kw));
+        targetCompanies = targetCompanies.filter(c => (c.name || '').toLowerCase().includes(kw));
       }
-
       columns = targetCompanies.map(c => ({
         id: c.companyId,
         title: c.name,
@@ -5266,33 +5241,31 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
       searchKeyword,
       filterCaId,
       filterCompanySearch,
-      scrollTop: savedScrollY
+      scrollTop: savedScrollY,
+      scrollLeft: savedScrollLeft
     });
 
     container.innerHTML = `
       <div class="space-y-4">
-        <!-- 画面ヘッダー ＆ [CA別][企業別] 2択トグル (指示書 3, 21, 22項) -->
         <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <div class="flex items-center space-x-3">
               <h2 class="text-xl font-extrabold text-slate-900 flex items-center gap-2">
-                <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 01-2 2m0 10V7m6 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 01-2 2"></path></svg>
+                <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 0 002-2V7a2 0 00-2-2h-2a2 2 0 01-2 2m0 10V7m6 10a2 2 0 002 2h2a2 0 002-2V7a2 0 00-2-2h-2a2 2 0 01-2 2"></path></svg>
                 ホワイトボード
               </h2>
               <span id="kanban-save-toast" class="text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded opacity-0 transition-opacity">
                 更新しました
               </span>
             </div>
-            <p class="text-xs text-slate-500 mt-1">※全候補者の選考進捗を俯瞰する画面です。</p>
+            <p class="text-xs text-slate-500 mt-1">全候補者の現在の選考進捗をCA別・企業別に俯瞰する画面です。</p>
           </div>
 
-          <!-- [CA別] [企業別] 2択トグルボタン (指示書 22項) -->
           <div class="flex items-center space-x-3 text-xs">
             <div class="bg-slate-100 p-1 rounded-lg flex items-center border border-slate-200 font-bold">
               <button id="btn-wb-toggle-ca" class="px-4 py-1.5 rounded transition ${selectedAxisMode === 'ca' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">CA別</button>
               <button id="btn-wb-toggle-company" class="px-4 py-1.5 rounded transition ${selectedAxisMode === 'company' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">企業別</button>
             </div>
-
             ${selectedAxisMode === 'ca' ? `
               <input type="text" id="input-wb-ca-search" value="${searchKeyword}" placeholder="CA名で検索..." class="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:bg-white focus:border-indigo-600">
             ` : `
@@ -5301,7 +5274,6 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
           </div>
         </div>
 
-        <!-- 超コンパクト「本日のRA対応」サマリーバー (指示書 14, 15, 16, 17, 18, 19項) -->
         <div class="bg-slate-900 text-white rounded-xl shadow-md border border-slate-800 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div class="flex items-center space-x-3">
             <button id="btn-toggle-ra-summary" class="font-bold text-indigo-300 hover:text-white flex items-center gap-1.5 text-xs">
@@ -5312,7 +5284,6 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
               </span>
             </button>
           </div>
-
           ${isRaAreaOpen ? `
             <div class="flex flex-wrap items-center gap-3">
               <div id="ra-sum-click-expired" class="cursor-pointer hover:bg-slate-800 px-2 py-1 rounded transition border border-transparent hover:border-slate-700">
@@ -5331,8 +5302,6 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
                 <span class="text-slate-400 font-semibold">要確認:</span>
                 <strong class="text-purple-400 font-black ml-1 text-sm">${raSummary.caCheck}</strong>
               </div>
-
-              <!-- 企業対応を開く ボタン (指示書 17項) -->
               <button id="btn-open-company-actions-page" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold rounded-lg text-xs transition shadow-sm border border-indigo-400 flex items-center gap-1.5 ml-2">
                 <span>企業対応を開く</span>
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
@@ -5341,12 +5310,10 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
           ` : ''}
         </div>
 
-        <!-- 【下部】現在のCA別ホワイトボード (5区分フェーズ行 ＆ 既存レイアウト保持) (指示書 3, 5, 8, 9, 24, 25, 26項) -->
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-4 space-y-4">
-          <div id="kanban-horizontal-scroll-container" class="overflow-x-auto">
+          <div id="kanban-horizontal-scroll-container" class="overflow-x-auto w-full">
             <div class="space-y-4" style="min-width: max-content; width: 100%;">
               ${sorted5Phases.map((pObj) => {
-                // ホワイトボード5区分グループに属する案件のフィルタリング
                 const groupSels = enrichedSelections.filter(s => {
                   if (s.phase === '内定辞退') {
                     const prevPhase = s.previousPhaseBeforeDecline || '内定';
@@ -5354,20 +5321,16 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
                   }
                   return s.wbGroup === pObj.label;
                 });
-
                 const groupCases = groupSels.length;
                 const groupPeople = calculateUniqueCandidatesCount(groupSels, false);
                 const groupYomi = groupSels.reduce((sum, s) => sum + (s.phase === '内定辞退' ? 0 : Number(s.yomi || 0)), 0);
-
                 return `
                   <div class="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-slate-50/50">
-                    <!-- 5区分フェーズヘッダーバー (指示書 4, 5項) (レベル表記は排除) -->
                     <div class="px-4 py-2 bg-slate-900 text-white flex items-center justify-between">
                       <div class="flex items-center space-x-3">
                         <span class="font-black text-sm text-indigo-200">${pObj.label}</span>
                         <span class="text-[11px] text-slate-400">（優先度: ${pObj.order}）</span>
                       </div>
-
                       <div class="flex items-center space-x-4 text-xs font-semibold">
                         <span>選考案件: <strong class="text-white">${groupCases}</strong>件</span>
                         <span class="text-slate-400">|</span>
@@ -5376,30 +5339,28 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
                         <span>ヨミ合計: <strong class="text-emerald-400">${Math.round(groupYomi * 100) / 100}</strong></span>
                       </div>
                     </div>
-
-                    <!-- カラム（CA別・チーム全体等）グリッド (指示書 2, 8, 9項) -->
-                    <div class="p-2 gap-3 bg-slate-100/50 min-h-[140px]" style="display: grid; grid-template-columns: repeat(${columns.length}, minmax(240px, 1fr));">
-                      ${columns.map(col => {
+                    <div class="p-2 bg-slate-100/50 min-h-[130px]" style="display: grid; grid-template-columns: repeat(${Math.max(columns.length, 1)}, minmax(240px, 1fr)); gap: 0.75rem;">
+                      ${columns.length === 0 ? `
+                        <div class="p-6 text-center text-xs text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200">対象となる列データがありません</div>
+                      ` : columns.map(col => {
                         const colGroupSels = groupSels.filter(s => col.filterFn(s));
                         const colYomi = colGroupSels.reduce((sum, s) => sum + (s.phase === '内定辞退' ? 0 : Number(s.yomi || 0)), 0);
                         const colPeople = calculateUniqueCandidatesCount(colGroupSels, false);
-
                         return `
-                          <div class="bg-slate-50 p-2 rounded-lg border border-slate-200 flex flex-col justify-between" data-column-id="${col.id}">
+                          <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex flex-col justify-between" data-column-id="${col.id}">
                             <div class="flex items-center justify-between border-b border-slate-200 pb-1.5 mb-2">
-                              <span class="font-bold text-xs text-slate-800 line-clamp-1">${col.title}</span>
-                              <span class="text-[10px] text-slate-500 font-medium">
+                              <span class="font-extrabold text-xs text-slate-800 line-clamp-1">${col.title}</span>
+                              <span class="text-[10px] text-slate-500 font-medium shrink-0 ml-1">
                                 案件:${colGroupSels.length} / 実人数:${colPeople} / ヨミ:${Math.round(colYomi * 100) / 100}
                               </span>
                             </div>
-
-                            <!-- ドロップゾーン -->
                             <div
-                              class="kanban-drop-zone space-y-2 flex-1 min-h-[100px] p-1 rounded transition"
+                              class="kanban-drop-zone space-y-2 flex-1 min-h-[90px] p-1 rounded transition"
                               data-drop-group="${pObj.label}"
+                              data-column-id="${col.id}"
                             >
                               ${colGroupSels.length === 0 ? `
-                                <div class="h-full border border-dashed border-slate-200 rounded flex items-center justify-center text-[10px] text-slate-400 py-6">
+                                <div class="h-full border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-[10px] text-slate-400 py-6">
                                   案件なし
                                 </div>
                               ` : colGroupSels.map(s => renderCaCardHTML(s, lastUpdatedSelectionId === s.selectionId, selectedAxisMode === 'company')).join('')}
@@ -5418,7 +5379,6 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
     `;
 
     const scrollContainer = container.querySelector('#kanban-horizontal-scroll-container');
-
     if (options.preserveScroll !== false) {
       setTimeout(() => {
         if (savedScrollY > 0) window.scrollTo({ top: savedScrollY, behavior: 'instant' });
@@ -5426,62 +5386,47 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
       }, 0);
     }
 
-    // -------------------------------------------------------------
-    // イベントバインド
-    // -------------------------------------------------------------
-
     container.querySelector('#btn-wb-toggle-ca')?.addEventListener('click', () => {
       selectedAxisMode = 'ca';
       saveKanbanState({ axisMode: 'ca' });
       updateView();
     });
-
     container.querySelector('#btn-wb-toggle-company')?.addEventListener('click', () => {
       selectedAxisMode = 'company';
       saveKanbanState({ axisMode: 'company' });
       updateView();
     });
-
     container.querySelector('#input-wb-ca-search')?.addEventListener('input', (e) => {
       searchKeyword = e.target.value;
       saveKanbanState({ searchKeyword });
       updateView();
     });
-
     container.querySelector('#input-wb-comp-search')?.addEventListener('input', (e) => {
       filterCompanySearch = e.target.value;
       saveKanbanState({ filterCompanySearch });
       updateView();
     });
-
     container.querySelector('#btn-toggle-ra-summary')?.addEventListener('click', () => {
       isRaAreaOpen = !isRaAreaOpen;
       saveKanbanState({ isRaAreaOpen });
       updateView({ preserveScroll: true });
     });
-
-    // 「企業対応を開く」ボタン ＆ サマリークリック遷移 (指示书 16, 17項)
     container.querySelector('#btn-open-company-actions-page')?.addEventListener('click', () => {
       if (onNavigateToCompanyActions) onNavigateToCompanyActions();
     });
-
     container.querySelector('#ra-sum-click-expired')?.addEventListener('click', () => {
       if (onNavigateToCompanyActions) onNavigateToCompanyActions('expired');
     });
-
     container.querySelector('#ra-sum-click-today')?.addEventListener('click', () => {
       if (onNavigateToCompanyActions) onNavigateToCompanyActions('today');
     });
-
     container.querySelector('#ra-sum-click-waiting')?.addEventListener('click', () => {
       if (onNavigateToCompanyActions) onNavigateToCompanyActions('waiting');
     });
-
     container.querySelector('#ra-sum-click-check')?.addEventListener('click', () => {
       if (onNavigateToCompanyActions) onNavigateToCompanyActions('ca_check');
     });
 
-    // 候補者カードクリックで詳細モーダル起動 (指示書 12項)
     container.querySelectorAll('.kanban-card').forEach(card => {
       card.addEventListener('click', () => {
         const selId = card.getAttribute('data-selection-id');
@@ -5490,16 +5435,17 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
       });
     });
 
-    // ドラッグ＆ドロップ ＆ フェーズ選択ダイアログ (指示書 9項)
     let draggedSelectionId = null;
+    let originColumnId = null;
 
-    container.querySelectorAll('[draggable="true"]').forEach(card => {
+    container.querySelectorAll('.kanban-card[draggable="true"]').forEach(card => {
       card.addEventListener('dragstart', (e) => {
         draggedSelectionId = card.getAttribute('data-selection-id');
+        const parentZone = card.closest('.kanban-drop-zone');
+        originColumnId = parentZone ? parentZone.getAttribute('data-column-id') : null;
         e.dataTransfer.setData('text/plain', draggedSelectionId);
         card.classList.add('opacity-40');
       });
-
       card.addEventListener('dragend', () => {
         card.classList.remove('opacity-40');
       });
@@ -5507,18 +5453,19 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
 
     container.querySelectorAll('.kanban-drop-zone').forEach(zone => {
       zone.addEventListener('dragover', (e) => {
+        const targetColId = zone.getAttribute('data-column-id');
+        if (originColumnId && targetColId !== originColumnId) return;
         e.preventDefault();
         zone.classList.add('bg-indigo-50/80', 'border-2', 'border-dashed', 'border-indigo-400');
       });
-
       zone.addEventListener('dragleave', () => {
         zone.classList.remove('bg-indigo-50/80', 'border-2', 'border-dashed', 'border-indigo-400');
       });
-
       zone.addEventListener('drop', (e) => {
+        const targetColId = zone.getAttribute('data-column-id');
+        if (originColumnId && targetColId !== originColumnId) return;
         e.preventDefault();
         zone.classList.remove('bg-indigo-50/80', 'border-2', 'border-dashed', 'border-indigo-400');
-
         const targetGroup = zone.getAttribute('data-drop-group');
         if (draggedSelectionId && targetGroup) {
           const selection = store.getSelections().find(s => s.selectionId === draggedSelectionId);
@@ -5527,7 +5474,7 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
               try {
                 lastUpdatedSelectionId = draggedSelectionId;
                 store.updateSelection(draggedSelectionId, { phase: newPhase }, 'ホワイトボードでのドラッグ＆ドロップ更新');
-                updateView({ preserveScroll: true }); // 即時上下連動更新 (指示書 25項)
+                updateView({ preserveScroll: true });
               } catch (err) {
                 alert('保存に失敗しました。');
               }
@@ -5541,66 +5488,10 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
   updateView({ preserveScroll: true });
 }
 
-/**
- * 上部「本日のRA対応」カードHTML (指示書 14, 17項)
- */
-function renderRaCardHTML(s, isHighlighted) {
-  const uObj = s.urgencyInfo;
-  const targetObj = NEXT_ACTION_TARGETS.find(t => t.code === s.nextActionTargetCode) || NEXT_ACTION_TARGETS[0];
-
-  return `
-    <div
-      data-selection-id="${s.selectionId}"
-      class="bg-slate-800 rounded-lg p-2.5 shadow-sm border border-slate-700 space-y-1.5 text-slate-200 ${isHighlighted ? 'ring-2 ring-indigo-400' : ''}"
-    >
-      <div class="flex items-start justify-between gap-1 border-b border-slate-700/60 pb-1.5">
-        <div>
-          <div class="font-bold text-xs text-white">
-            ${s.candidateObj ? s.candidateObj.name : s.candidateName} 様
-          </div>
-          <div class="text-[10px] text-slate-400 line-clamp-1">
-            ${s.companyObj ? s.companyObj.name : s.companyName}
-          </div>
-        </div>
-
-        <div class="flex flex-col items-end space-y-0.5">
-          <span class="px-1.5 py-0.2 rounded text-[8px] ${uObj.badgeClass}">${uObj.label}</span>
-          <span class="px-1 py-0.2 rounded text-[8px] font-bold ${targetObj.badgeClass}">対応先: ${targetObj.label}</span>
-        </div>
-      </div>
-
-      <div class="text-[10px] text-indigo-300 font-bold flex items-center justify-between">
-        <span>${s.phase} (${s.progressStatus})</span>
-        <span class="text-slate-400">CA: ${s.caObj ? s.caObj.name.split(' ')[0] : s.caName || '-'}</span>
-      </div>
-
-      <div class="text-[10px] text-slate-300 bg-slate-900/60 px-2 py-1 rounded border border-slate-700 line-clamp-1">
-        <strong class="text-indigo-400 font-bold">次:</strong> ${s.nextActionText}
-      </div>
-
-      <div class="pt-1 flex items-center justify-end space-x-1 text-[10px]">
-        <button class="btn-wb-email px-2 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded transition" data-company-id="${s.companyId}" data-selection-id="${s.selectionId}">
-          メール
-        </button>
-        <button class="btn-wb-mark-contacted px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded transition" data-selection-id="${s.selectionId}">
-          連絡済み
-        </button>
-        <button class="btn-card-detail px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition font-bold" data-id="${s.selectionId}">
-          詳細
-        </button>
-      </div>
-    </div>
-  `;
-}
-
-/**
- * ホワイトボード用コンパクト候補者カードHTML (指示書 9, 10, 11項)
- */
 function renderCaCardHTML(s, isHighlighted, isCompanyAxis) {
   const isDeclined = s.phase === '内定辞退';
   const uObj = s.urgencyInfo || {};
   const percentStr = Math.round((Number(s.yomi) || 0) * 100) + '%';
-
   return `
     <div
       draggable="${isDeclined ? 'false' : 'true'}"
@@ -5611,7 +5502,6 @@ function renderCaCardHTML(s, isHighlighted, isCompanyAxis) {
           : 'bg-white border-slate-200 hover:shadow-md hover:border-indigo-400 cursor-grab active:cursor-grabbing group'
       } ${isHighlighted ? 'ring-4 ring-indigo-500 border-indigo-500 font-semibold shadow-md' : ''}"
     >
-      <!-- 1行目: 候補者名 ＆ バッジ (指示書 9, 10項) -->
       <div class="flex items-center justify-between gap-1 border-b border-slate-100 pb-1">
         <div class="font-extrabold text-xs text-slate-900 truncate group-hover:text-indigo-600 transition" title="${s.candidateObj ? s.candidateObj.name : s.candidateName}">
           ${s.candidateObj ? s.candidateObj.name : s.candidateName} 様
@@ -5622,28 +5512,20 @@ function renderCaCardHTML(s, isHighlighted, isCompanyAxis) {
           <span class="px-1.5 py-0.2 rounded text-[8px] font-extrabold ${uObj.badgeClass} shrink-0">${uObj.label}</span>
         ` : ''}
       </div>
-
-      <!-- 2行目: 企業名 (CA別表示時) または CA名 (企業別表示時) (指示書 9項) -->
       <div class="text-[10px] text-slate-700 truncate">
-        ${isCompanyAxis ? `CA: <strong class="text-indigo-900 font-bold">${s.caObj ? s.caObj.name.split(' ')[0] : s.caName || '-'}</strong>` : `<strong class="text-slate-900 font-bold">${s.companyObj ? s.companyObj.name : s.companyName}</strong>`}
+        ${isCompanyAxis ? `CA: <strong class="text-indigo-900 font-bold">${s.caObj ? (s.caObj.name || '').split(' ')[0] : s.caName || '-'}</strong>` : `<strong class="text-slate-900 font-bold">${s.companyObj ? s.companyObj.name : s.companyName}</strong>`}
       </div>
-
-      <!-- 3行目: 求人・ポジション名 (指示書 9, 10項) -->
       <div class="text-[10px] text-slate-500 truncate" title="${s.jobObj ? (s.jobObj.title || s.jobObj.jobName) : s.jobName}">
         ${s.jobObj ? (s.jobObj.title || s.jobObj.jobName) : s.jobName}
       </div>
-
-      <!-- 4行目: 実際の選考フェーズ ｜ 進行状態 ＆ ヨミ (指示書 9, 10項) -->
       <div class="flex items-center justify-between pt-1 border-t border-slate-100 text-[10px]">
         <div class="font-bold text-indigo-800 truncate">${s.phase} <span class="text-slate-400 font-normal">｜ ${s.progressStatus}</span></div>
         <div class="font-black text-slate-900 shrink-0 ml-1">ヨミ ${percentStr}</div>
       </div>
+    </div>
   `;
 }
 
-/**
- * ドロップ時の実フェーズ選択ダイアログ (指示書 9項)
- */
 function handlePhaseDropWithDialog(selection, targetGroupLabel, onConfirm) {
   if (targetGroupLabel === '最終・二次') {
     const dialog = createOptionsDialog('「最終・二次」フェーズへ移動', '移動先の実フェーズを選択してください:', [
@@ -5663,6 +5545,8 @@ function handlePhaseDropWithDialog(selection, targetGroupLabel, onConfirm) {
   } else if (targetGroupLabel === '内定承諾') {
     onConfirm('内定承諾');
   } else if (targetGroupLabel === '書類選考') {
+    onConfirm('書類選考');
+  } else {
     onConfirm('書類選考');
   }
 }
