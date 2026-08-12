@@ -69,6 +69,8 @@ export function initFirebase() {
   }
 
   return db;
+}
+
 export async function ensureFirebaseAuth() {
   const firestore = initFirebase();
   if (typeof firebase !== 'undefined' && firebase.auth) {

@@ -69,7 +69,9 @@ function initFirebase() {
   }
 
   return db;
-async function ensureFirebaseAuth() {
+}
+
+function ensureFirebaseAuth() {
   const firestore = initFirebase();
   if (typeof firebase !== 'undefined' && firebase.auth) {
     const auth = firebase.auth();
@@ -88,7 +90,7 @@ async function ensureFirebaseAuth() {
 /**
  * 指示書 1, 6項準拠: includeMetadataChanges: true を持つ端末B診断用 onSnapshot リスナー
  */
-async function listenCollection(collectionName, callback) {
+function listenCollection(collectionName, callback) {
   const firestore = await ensureFirebaseAuth();
   const config = getFirebaseConfig();
 
@@ -169,7 +171,7 @@ async function listenCollection(collectionName, callback) {
 /**
  * 指示書 6項: 強制サーバー読込 (getDocsFromServer 相当) ＆ B_SERVER_READ ログ
  */
-async function fetchServerReadDirect(collectionName = "selections") {
+function fetchServerReadDirect(collectionName = "selections") {
   const firestore = await ensureFirebaseAuth();
   if (!firestore) return [];
 
@@ -212,7 +214,7 @@ async function fetchServerReadDirect(collectionName = "selections") {
 /**
  * Firestore 直接書き込み (新規・更新)
  */
-async function saveFirestoreDoc(collectionName, docId, payload) {
+function saveFirestoreDoc(collectionName, docId, payload) {
   const firestore = initFirebase();
   if (!firestore) return false;
 
@@ -244,7 +246,7 @@ async function saveFirestoreDoc(collectionName, docId, payload) {
 /**
  * Firestore 直接削除
  */
-async function deleteFirestoreDoc(collectionName, docId) {
+function deleteFirestoreDoc(collectionName, docId) {
   const firestore = initFirebase();
   if (!firestore || !docId) return false;
 
@@ -3306,7 +3308,7 @@ function buildCandidateListEmailText(selections, candidatesMap, jobsMap, histori
 /**
  * クリップボードへの文字列コピー
  */
-async function copyToClipboard(text) {
+function copyToClipboard(text) {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
@@ -11020,7 +11022,7 @@ function showSimilarWarningModal(inputName, similarCands, callback) {
  * 指示書 1, 3, 4項: 共通データ不一致の強制切り分けテスト専用画面 (/sync-diagnostic)
  * ※ localStorage, sessionStorage, IndexedDB, デモデータ, 既存 state を完全遮断
  */
-async function renderSyncDiagnosticView(container) {
+function renderSyncDiagnosticView(container) {
   if (!container) return;
 
   container.innerHTML = `

@@ -33,11 +33,11 @@ $combined = ""
 foreach ($f in $files) {
     if (Test-Path $f) {
         $text = [System.IO.File]::ReadAllText($f, [System.Text.Encoding]::UTF8)
-        # remove import statements
-        $text = [System.Text.RegularExpressions.Regex]::Replace($text, "(?m)^import\s+[\s\S]*?from\s+['""][^'""]+['""];?", "")
+        # remove import statements safely
+        $text = [System.Text.RegularExpressions.Regex]::Replace($text, "(?s)import\s*(?:\{[^}]*\}|\*\s*as\s+\w+|\w+)\s*from\s*['""][^'""]+['""];?", "")
         # remove export keywords
         $text = [System.Text.RegularExpressions.Regex]::Replace($text, "(?m)^export\s+default\s+", "")
-        $text = [System.Text.RegularExpressions.Regex]::Replace($text, "(?m)^export\s+", "")
+        $text = [System.Text.RegularExpressions.Regex]::Replace($text, "(?m)^export\s+(?:async\s+)?", "")
         $combined += $text + "`n`n"
     }
 }
