@@ -227,45 +227,6 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
         </div>
             </div>
 
-            <div class="p-2 rounded-lg bg-slate-800/80 border border-slate-700 text-left">
-              <div class="text-[10px] text-slate-400">本日対応</div>
-              <div class="text-base font-black text-orange-400">${raSummary.today} <span class="text-[10px] font-normal text-slate-400">件</span></div>
-            </div>
-
-            <div class="p-2 rounded-lg bg-slate-800/80 border border-slate-700 text-left">
-              <div class="text-[10px] text-slate-400">企業への確認</div>
-              <div class="text-base font-bold text-indigo-300">${raSummary.companyCheck} <span class="text-[10px] font-normal text-slate-400">件</span></div>
-            </div>
-
-            <div class="p-2 rounded-lg bg-slate-800/80 border border-slate-700 text-left">
-              <div class="text-[10px] text-slate-400">CAへの確認</div>
-              <div class="text-base font-bold text-purple-300">${raSummary.caCheck} <span class="text-[10px] font-normal text-slate-400">件</span></div>
-            </div>
-
-            <div class="p-2 rounded-lg bg-slate-800/80 border border-slate-700 text-left">
-              <div class="text-[10px] text-slate-400">企業回答待ち</div>
-              <div class="text-base font-bold text-sky-300">${raSummary.companyWaiting} <span class="text-[10px] font-normal text-slate-400">件</span></div>
-            </div>
-          </div>
-
-          <!-- 折りたたみ可能な案件リスト (指示書 11, 14, 20, 22項) -->
-          ${isRaAreaOpen ? `
-            <div class="pt-2 border-t border-slate-800 space-y-3">
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                ${displayedRaSelections.length === 0 ? `
-                  <div class="col-span-full py-6 text-center text-slate-400 text-xs">本日対応すべきRA案件はありません。</div>
-                ` : displayedRaSelections.map(s => renderRaCardHTML(s, lastUpdatedSelectionId === s.selectionId)).join('')}
-              </div>
-
-              ${normalSels.length > 5 ? `
-                <div class="text-center pt-1">
-                  <button id="btn-toggle-ra-limit" class="px-4 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold rounded text-[11px] border border-slate-700 transition">
-                    ${showAllRaItems ? '折りたたむ (通常表示に戻す)' : `すべて表示する (全 ${raActionSelections.length} 件)`}
-                  </button>
-                </div>
-              ` : ''}
-            </div>
-          ` : ''}
         </div>
 
         <!-- 【下部】現在のCA別ホワイトボード (5区分フェーズ行 ＆ 既存レイアウト保持) (指示書 3, 5, 8, 9, 24, 25, 26項) -->
