@@ -244,6 +244,29 @@ async function saveFirestoreDoc(collectionName, docId, payload) {
 }
 
 /**
+ * 指示書 10項: 1件のドキュメントをサーバーから直接Read-back確認
+ */
+async function readbackFirestoreDoc(collectionName, docId) {
+  const firestore = await ensureFirebaseAuth();
+  if (!firestore || !docId) return null;
+
+  try {
+    const docSnap = await firestore.collection(collectionName).doc(String(docId)).get({ source: 'server' });
+    if (docSnap.exists) {
+      const data = docSnap.data();
+      console.log(`[SAVE 07] firestore readback success (${collectionName}/${docId}):`, data);
+      return data;
+    } else {
+      console.warn(`[SAVE 07] firestore readback warning: document ${docId} does not exist on server.`);
+      return null;
+    }
+  } catch (err) {
+    console.warn(`[SAVE 07] firestore readback warning (${collectionName}/${docId}):`, err.message || err);
+    return null;
+  }
+}
+
+/**
  * Firestore 直接削除
  */
 async function deleteFirestoreDoc(collectionName, docId) {
@@ -4660,6 +4683,7 @@ function renderSelectionList(container, options = {}, callbacks = {}) {
 
 
 
+
 function openSelectionDetailModal(selectionId, onClose) {
   let modalEl = document.getElementById('selection-detail-modal');
   if (modalEl) modalEl.remove();
@@ -5124,26 +5148,35 @@ function openSelectionDetailModal(selectionId, onClose) {
       companyActionSource: actionSourceState
     };
 
-    // 指示書 3, 4, 5, 12, 19, 22項: [SAVE] 1 start ＆ 2 payload ready
-    console.log("[SAVE] 1 start", { selectionId });
-    console.log("[SAVE] 2 payload ready", payload);
+    // 指示書 2, 3, 4項: トレースログ [SAVE 01] 〜 [SAVE 03]
+    console.log("[SAVE 01] clicked");
+    console.log("[SAVE 02] selectionId", { collectionName: "selections", docId: selectionId, selectionId });
+    console.log("[SAVE 03] payload", payload);
 
     saveBtn.disabled = true;
     saveBtn.textContent = '保存中...';
 
     let isSuccess = false;
     try {
-      // 指示書 7, 8, 9項: selection 本体の非同期保存を実行
+      console.log("[SAVE 04] firestore write start");
       isSuccess = await store.updateSelection(selectionId, payload, '詳細モーダルからの保存', saveOptions);
       if (isSuccess) {
-        console.log("[SAVE] 9 completed");
+        console.log("[SAVE 05] firestore write success");
+
+        // 指示書 10項: 1件単独 Read-back 検証
+        console.log("[SAVE 06] firestore readback start");
+        const readData = await readbackFirestoreDoc('selections', selectionId);
+        if (readData) {
+          console.log("[SAVE 07] firestore readback success", { phase: readData.phase, progressStatus: readData.progressStatus, yomi: readData.yomi });
+        }
+        console.log("[SAVE 08] local state updated");
+        console.log("[SAVE 09] complete");
       }
     } catch (err) {
       console.error("[SAVE] FAILED", err);
-      // 指示書 5項: 保存失敗メッセージ
       alert('保存に失敗しました。\nもう一度お試しください。');
     } finally {
-      // 指示書 4項: 成功・失敗にかかわらず必ず保存中状態を解除
+      // 指示書 12項: 成功・失敗にかかわらず保存中状態を解除
       saveBtn.disabled = false;
       saveBtn.textContent = '変更を保存する';
 

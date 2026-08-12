@@ -244,6 +244,29 @@ export async function saveFirestoreDoc(collectionName, docId, payload) {
 }
 
 /**
+ * 指示書 10項: 1件のドキュメントをサーバーから直接Read-back確認
+ */
+export async function readbackFirestoreDoc(collectionName, docId) {
+  const firestore = await ensureFirebaseAuth();
+  if (!firestore || !docId) return null;
+
+  try {
+    const docSnap = await firestore.collection(collectionName).doc(String(docId)).get({ source: 'server' });
+    if (docSnap.exists) {
+      const data = docSnap.data();
+      console.log(`[SAVE 07] firestore readback success (${collectionName}/${docId}):`, data);
+      return data;
+    } else {
+      console.warn(`[SAVE 07] firestore readback warning: document ${docId} does not exist on server.`);
+      return null;
+    }
+  } catch (err) {
+    console.warn(`[SAVE 07] firestore readback warning (${collectionName}/${docId}):`, err.message || err);
+    return null;
+  }
+}
+
+/**
  * Firestore 直接削除
  */
 export async function deleteFirestoreDoc(collectionName, docId) {
