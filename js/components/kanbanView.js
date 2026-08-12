@@ -42,6 +42,7 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
 
   function updateView(options = {}) {
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
+    const savedScrollLeft = options.preserveScroll !== false ? (savedState.scrollLeft || 0) : 0;
 
     const selections = store.getSelections();
     const companies = store.getCompanies();
