@@ -5503,19 +5503,6 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
       filterCompanySearch = e.target.value;
       saveKanbanState({ filterCompanySearch });
       updateBoardOnly();
-          if (selection) {
-            handlePhaseDropWithDialog(selection, targetGroup, (newPhase) => {
-              try {
-                lastUpdatedSelectionId = draggedSelectionId;
-                store.updateSelection(draggedSelectionId, { phase: newPhase }, 'ホワイトボードでのドラッグ＆ドロップ更新');
-                updateView({ preserveScroll: true });
-              } catch (err) {
-                alert('保存に失敗しました。');
-              }
-            });
-          }
-        }
-      });
     });
   }
 
