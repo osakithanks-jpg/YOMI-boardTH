@@ -1,5 +1,6 @@
 /**
- * 選考進捗・ヨミ管理システム - 企業対応リスト画面コンポーネント (指示書 3, 12〜27項 - タイトル簡略化 ＆ 3ブロック表示最適化)
+ * 選考進捗・ヨミ管理システム - ヨミ表画面コンポーネント (指示書全34項準拠)
+ * ヨミ％順 (100% ➔ 75% ➔ 50% ➔ 25% ➔ 0%) ＞ コンサル順 ＞ フェーズ進行度順 に全選考案件を美しく整列
  */
 
 import { store } from '../store.js';
@@ -7,518 +8,390 @@ import { COMPANY_ACTION_TYPES, COMPANY_ACTION_STATUSES } from '../constants.js';
 import { getDateInfoForSelection, normalizeCandidateName } from '../utils/mailTemplate.js';
 import { calculateUniqueCandidatesCount } from '../utils/yomiCalculations.js';
 
-const ACTION_LIST_STORAGE_KEY = 'company_action_list_active_state';
+const YOMI_TABLE_STORAGE_KEY = 'yomi_table_active_state_v1';
 
-function getSavedActionState() {
+function getSavedYomiState() {
   try {
-    const raw = sessionStorage.getItem(ACTION_LIST_STORAGE_KEY);
+    const raw = sessionStorage.getItem(YOMI_TABLE_STORAGE_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch (e) {
     return {};
   }
 }
 
-function saveActionState(state) {
+function saveYomiState(state) {
   try {
-    const current = getSavedActionState();
-    sessionStorage.setItem(ACTION_LIST_STORAGE_KEY, JSON.stringify({ ...current, ...state }));
+    const current = getSavedYomiState();
+    sessionStorage.setItem(YOMI_TABLE_STORAGE_KEY, JSON.stringify({ ...current, ...state }));
   } catch (e) {}
 }
 
 /**
- * 候補者選考案件が「対応対象」かどうかを判定 (指示書 11, 27項)
+ * 表示用ヨミ値 (displayYomi) の算出 (指示書 10, 11, 12, 32項)
  */
-function isActionNeededSelection(s, today) {
-  if (s.phase === '選考終了' || s.phase === '内定辞退') return false;
-  if (s.companyActionStatus === '完了' || s.companyActionStatus === '対応完了') return false;
+function getDisplayYomi(s) {
+  if (!s) return 0;
+  const p = (s.phase || '').trim();
 
-  if (s.progressStatus === '実施済み・結果待ち') return true;
-  if (s.companyActionStatus === '未対応' || s.companyActionStatus === '回答待ち' || s.companyActionStatus === '催促中' || s.companyActionStatus === 'CA確認待ち') return true;
-  if (s.actionDeadline && new Date(s.actionDeadline) <= today) return true;
-  if (s.nextCompanyContactDate && new Date(s.nextCompanyContactDate) <= today) return true;
-  if (s.phase === '書類選考' && s.progressStatus === '未対応') return true;
-  if (s.phase.includes('面接') && (s.progressStatus === '日程調整中' || s.progressStatus === '未対応')) return true;
-  if (s.phase === 'オファー面談・条件提示' || s.phase === '内定') return true;
+  // 指示書 6, 27項: 内定承諾関係フェーズは表示上100%優先
+  if (['内定承諾', '承諾', '入社予定', '入社日確定', '承諾後手続き', '入社手続き中'].includes(p)) {
+    return 100;
+  }
 
-  return false;
+  // ヨミ値の正規化 (100, "75%", 0.75 -> 数値)
+  const rawYomi = s.yomi;
+  if (rawYomi === undefined || rawYomi === null || rawYomi === '' || rawYomi === 'なし') {
+    return 0;
+  }
+
+  let num = Number(String(rawYomi).replace('%', '').trim());
+  if (isNaN(num)) return 0;
+
+  if (num <= 1 && num > 0) {
+    num = Math.round(num * 100);
+  }
+
+  if ([100, 75, 50, 25, 0].includes(num)) {
+    return num;
+  }
+
+  if (num >= 85) return 100;
+  if (num >= 65) return 75;
+  if (num >= 40) return 50;
+  if (num >= 15) return 25;
+
+  return 0;
+}
+
+/**
+ * フェーズ進行度スコア (同一CA・同一ヨミ内のソート用 指示書 15項)
+ */
+function getPhaseOrderScore(phase) {
+  const p = (phase || '').trim();
+  if (['内定承諾', '承諾', '入社予定', '入社日確定'].includes(p)) return 100;
+  if (['内定', 'オファー面談', 'オファー面談・条件提示', '条件提示', '条件調整', '内定回答待ち'].includes(p)) return 90;
+  if (['最終面接', '最終選考', '役員面接'].includes(p)) return 80;
+  if (['三次面接', '三次選考'].includes(p)) return 70;
+  if (['二次面接', '二次選考'].includes(p)) return 60;
+  if (['一次面接', '一次選考', '一次面談'].includes(p)) return 50;
+  if (['推薦済み', '書類提出済み', '書類選考', '書類選考結果待ち', '推薦準備'].includes(p)) return 40;
+  return 10;
 }
 
 export function renderCompanyActionListView(container, { onOpenDetail, onOpenEmailComposer }) {
   const currentCons = store.getCurrentConsultant();
-  const savedState = getSavedActionState();
+  const savedState = getSavedYomiState();
 
-  let filterPriority = savedState.filterPriority || '';
-  let filterRaId = savedState.filterRaId !== undefined ? savedState.filterRaId : (currentCons.roleType === 'RA' ? currentCons.consultantId : '');
-  let filterOnlyMine = savedState.filterOnlyMine !== undefined ? savedState.filterOnlyMine : (currentCons.roleType === 'RA');
+  let filterCaId = savedState.filterCaId || '';
   let searchKw = savedState.searchKw || '';
-  let sortBy = savedState.sortBy || 'priority_default';
-  let openCompanyIds = new Set(savedState.openCompanyIds || []);
-  let showModeMap = savedState.showModeMap || {};
+  let collapsedGroups = new Set(savedState.collapsedGroups || []);
 
   function updateView(options = {}) {
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
 
-    const companies = store.getCompanies();
-    const selections = store.getSelections();
-    const consultants = store.getConsultants();
-    const jobs = store.getJobs();
-    const candidates = store.getCandidates();
-    const histories = store.getHistories();
+    const selections = store.getSelections() || [];
+    const companies = store.getCompanies() || [];
+    const jobs = store.getJobs() || [];
+    const candidates = store.getCandidates() || [];
+    const consultants = store.getConsultants() || [];
 
-    const consultantsMap = new Map(consultants.map(c => [c.consultantId, c]));
+    const companiesMap = new Map(companies.map(c => [c.companyId, c]));
     const candidatesMap = new Map(candidates.map(c => [c.candidateId, c]));
     const jobsMap = new Map(jobs.map(j => [j.jobId, j]));
-    const raConsultants = consultants.filter(c => c.roleType === 'RA' || c.roleType === 'ADMIN');
+    const consultantsMap = new Map(consultants.map(c => [c.consultantId, c]));
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    // 企業ごとの優先度判定・最優先代表アクション算出 (指示書 13, 14, 15項)
-    const companyActionCards = companies.map(comp => {
-      const compSelections = selections.filter(s => !s.isArchived && s.companyId === comp.companyId);
-      const activeSelections = compSelections.filter(s => s.phase !== '選考終了' && s.phase !== '内定辞退');
-      const actionNeededSelections = compSelections.filter(s => isActionNeededSelection(s, today));
-
-      let expiredCount = 0;
-      let todayCount = 0;
-      let waitingCount = 0;
-      let caCheckCount = 0;
-      let topActionText = '';
-
-      actionNeededSelections.forEach(s => {
-        const u = s.urgencyInfo || {};
-        if (u.code === 'expired') expiredCount++;
-        else if (u.code === 'today') todayCount++;
-        else if (u.code === 'waiting') waitingCount++;
-        else if (u.code === 'ca_check') caCheckCount++;
-
-        if (!topActionText) {
-          const cand = candidatesMap.get(s.candidateId);
-          const cName = cand ? cand.name : (s.candidateName || '');
-          topActionText = s.nextAction ? `${cName}様: ${s.nextAction}` : `${cName}様: 選考結果・進捗の確認`;
-        }
-      });
-
-      // 優先順位スコア計算 (指示書 15項)
-      let priorityScore = 0;
-      if (expiredCount > 0) priorityScore = 5;
-      else if (todayCount > 0) priorityScore = 4;
-      else if (actionNeededSelections.length > 0) priorityScore = 3;
-      else if (waitingCount > 0) priorityScore = 2;
-      else if (caCheckCount > 0) priorityScore = 1;
-
-      const primaryRa = consultantsMap.get(comp.primaryRaId || comp.raConsultantId);
-      const uniquePeople = calculateUniqueCandidatesCount(activeSelections, false);
-
-      return {
-        company: comp,
-        primaryRa,
-        allSelections: compSelections,
-        activeSelections,
-        actionNeededSelections,
-        inProgressCount: activeSelections.length,
-        actionNeededCount: actionNeededSelections.length,
-        expiredCount,
-        todayCount,
-        waitingCount,
-        caCheckCount,
-        topActionText: topActionText || '特になし',
-        uniquePeople,
-        priorityScore
-      };
+    // コンサル順の定義作成 (指示書 13, 14項)
+    const sortedConsultants = [...consultants].sort((a, b) => {
+      const orderA = a.displayOrder !== undefined ? a.displayOrder : (a.sortOrder !== undefined ? a.sortOrder : 999);
+      const orderB = b.displayOrder !== undefined ? b.displayOrder : (b.sortOrder !== undefined ? b.sortOrder : 999);
+      if (orderA !== orderB) return orderA - orderB;
+      const kanaA = a.nameKana || a.name || '';
+      const kanaB = b.nameKana || b.name || '';
+      return kanaA.localeCompare(kanaB, 'ja');
     });
 
-    let filtered = companyActionCards.filter(card => {
-      if (card.company.isArchived) return false;
-      if (filterOnlyMine && card.company.primaryRaId !== currentCons.consultantId) return false;
-      if (filterRaId && card.company.primaryRaId !== filterRaId) return false;
+    const consultantIndexMap = new Map();
+    sortedConsultants.forEach((c, idx) => {
+      consultantIndexMap.set(c.consultantId, idx);
+      if (c.email) consultantIndexMap.set(c.email.toLowerCase(), idx);
+      if (c.name) consultantIndexMap.set((c.name || '').split(' ')[0], idx);
+    });
+
+    const getCaOrder = (s) => {
+      if (s.caId && consultantIndexMap.has(s.caId)) return consultantIndexMap.get(s.caId);
+      if (s.caConsultantId && consultantIndexMap.has(s.caConsultantId)) return consultantIndexMap.get(s.caConsultantId);
+      if (s.caEmail && consultantIndexMap.has(s.caEmail.toLowerCase())) return consultantIndexMap.get(s.caEmail.toLowerCase());
+      if (s.caName && consultantIndexMap.has((s.caName || '').split(' ')[0])) return consultantIndexMap.get((s.caName || '').split(' ')[0]);
+      return 9999; // 未設定
+    };
+
+    // 指示書 28項: 終了案件（見送り・選考終了・アーカイブ）は除外、辞退は除外
+    const activeSelections = selections.filter(s => {
+      if (!s || s.isArchived || s.isDeleted) return false;
+      const p = s.phase || '';
+      return p !== '選考終了' && p !== '書類見送り' && p !== '面接見送り' && p !== '候補者辞退' && p !== '他社決定' && p !== '内定辞退';
+    });
+
+    // 検索 ＆ 担当者フィルター
+    let filteredSelections = activeSelections.filter(s => {
+      if (filterCaId && s.caId !== filterCaId && s.caConsultantId !== filterCaId) return false;
 
       if (searchKw) {
         const kw = searchKw.toLowerCase();
-        if (!card.company.name.toLowerCase().includes(kw)) return false;
-      }
+        const cand = candidatesMap.get(s.candidateId);
+        const comp = companiesMap.get(s.companyId);
+        const job = jobsMap.get(s.jobId);
+        const ca = consultantsMap.get(s.caId || s.caConsultantId);
 
-      if (filterPriority === 'expired' && card.expiredCount === 0) return false;
-      if (filterPriority === 'today' && card.todayCount === 0) return false;
+        const candName = (cand ? cand.name : s.candidateName || '').toLowerCase();
+        const compName = (comp ? comp.name : s.companyName || '').toLowerCase();
+        const jobName = (job ? (job.title || job.jobName) : s.jobName || '').toLowerCase();
+        const caName = (ca ? ca.name : s.caName || '').toLowerCase();
+
+        if (!candName.includes(kw) && !compName.includes(kw) && !jobName.includes(kw) && !caName.includes(kw)) {
+          return false;
+        }
+      }
 
       return true;
     });
 
-    // 指示書 15項のデフォルト並び順：期限超過 ➔ 本日対応 ➔ 要確認 ➔ 企業回答待ち ➔ CA確認 ➔ 企業名
-    filtered.sort((a, b) => {
-      if (sortBy === 'priority_default') {
-        const diff = b.priorityScore - a.priorityScore;
-        if (diff !== 0) return diff;
-        return a.company.name.localeCompare(b.company.name, 'ja');
-      }
-      if (sortBy === 'action_count_desc') return b.actionNeededCount - a.actionNeededCount;
-      return a.company.name.localeCompare(b.company.name, 'ja');
+    // 各案件に displayYomi と CA順・フェーズ順キーを付与
+    const enriched = filteredSelections.map(s => {
+      const displayYomi = getDisplayYomi(s);
+      const caOrder = getCaOrder(s);
+      const phaseScore = getPhaseOrderScore(s.phase);
+      const comp = companiesMap.get(s.companyId);
+      const cand = candidatesMap.get(s.candidateId);
+      const job = jobsMap.get(s.jobId);
+      const ca = consultantsMap.get(s.caId || s.caConsultantId);
+
+      return {
+        ...s,
+        displayYomi,
+        caOrder,
+        phaseScore,
+        companyObj: comp,
+        candidateObj: cand,
+        jobObj: job,
+        caObj: ca
+      };
     });
 
-    saveActionState({
-      filterPriority,
-      filterRaId,
-      filterOnlyMine,
-      searchKw,
-      sortBy,
-      openCompanyIds: Array.from(openCompanyIds),
-      showModeMap,
-      scrollTop: savedScrollY
+    // グルーピング (100% -> 75% -> 50% -> 25% -> 0%)
+    const yomiGroupDefs = [
+      { key: '100', label: '100％｜内定承諾', yomiVal: 100 },
+      { key: '75', label: '75％', yomiVal: 75 },
+      { key: '50', label: '50％', yomiVal: 50 },
+      { key: '25', label: '25％', yomiVal: 25 },
+      { key: '0', label: '0％｜なし・書類選考中', yomiVal: 0 }
+    ];
+
+    const yomiGroups = yomiGroupDefs.map(g => {
+      const groupSels = enriched.filter(s => s.displayYomi === g.yomiVal);
+
+      // グループ内ソート: CA順 (昇順) ➔ フェーズ順 (降順) ➔ ID
+      groupSels.sort((a, b) => {
+        if (a.caOrder !== b.caOrder) return a.caOrder - b.caOrder;
+        if (a.phaseScore !== b.phaseScore) return b.phaseScore - a.phaseScore;
+        return (a.selectionId || '').localeCompare(b.selectionId || '');
+      });
+
+      return {
+        ...g,
+        selections: groupSels,
+        count: groupSels.length
+      };
     });
+
+    saveYomiState({
+      filterCaId,
+      searchKw,
+      collapsedGroups: Array.from(collapsedGroups)
+    });
+
+    // 各ヨミグループのテーブルHTML組み立て
+    const groupsHTML = yomiGroups.map(g => {
+      const isCollapsed = collapsedGroups.has(g.key);
+      const selCount = g.count;
+
+      return `
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-4">
+          <!-- グループ見出しバナー (指示書 17, 18, 19項) -->
+          <div
+            class="px-4 py-3 bg-slate-900 text-white flex items-center justify-between cursor-pointer hover:bg-slate-800 transition select-none btn-toggle-yomi-group"
+            data-group-key="${g.key}"
+          >
+            <div class="flex items-center space-x-3">
+              <span class="text-indigo-400 font-black text-sm">${isCollapsed ? '▶' : '▼'}</span>
+              <h3 class="font-extrabold text-sm text-white tracking-wide">${g.label}</h3>
+              <span class="bg-indigo-600/40 text-indigo-200 border border-indigo-400/30 text-xs px-2.5 py-0.5 rounded-full font-bold">
+                ${selCount} 件
+              </span>
+            </div>
+            <div class="text-xs text-slate-400 font-medium">
+              ${isCollapsed ? 'クリックして展開' : 'クリックして折りたたむ'}
+            </div>
+          </div>
+
+          ${!isCollapsed ? `
+            <div class="overflow-x-auto">
+              ${selCount === 0 ? `
+                <div class="p-6 text-center text-slate-400 text-xs font-semibold bg-slate-50/50">
+                  該当する案件はありません
+                </div>
+              ` : `
+                <table class="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr class="bg-slate-100/80 border-b border-slate-200 text-slate-600 font-extrabold">
+                      <th class="py-2.5 px-3">候補者名</th>
+                      <th class="py-2.5 px-3">企業名 ｜ 求人</th>
+                      <th class="py-2.5 px-3">担当CA</th>
+                      <th class="py-2.5 px-3">選考フェーズ</th>
+                      <th class="py-2.5 px-3">進行状態</th>
+                      <th class="py-2.5 px-3 text-center">ヨミ</th>
+                      <th class="py-2.5 px-3 text-center">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-slate-800">
+                    ${g.selections.map(s => {
+                      const candName = s.candidateObj ? s.candidateObj.name : (s.candidateName || '-');
+                      const compName = s.companyObj ? s.companyObj.name : (s.companyName || '-');
+                      const jobTitle = s.jobObj ? (s.jobObj.title || s.jobObj.jobName) : (s.jobName || '-');
+                      const caName = s.caObj ? (s.caObj.name || '').split(' ')[0] : (s.caName || '未設定');
+
+                      return `
+                        <tr class="hover:bg-indigo-50/40 transition group">
+                          <td class="py-2.5 px-3 font-extrabold text-slate-900">
+                            <span class="cursor-pointer hover:text-indigo-600 transition btn-open-detail" data-selection-id="${s.selectionId}">
+                              ${candName} 様
+                            </span>
+                          </td>
+                          <td class="py-2.5 px-3">
+                            <div class="font-bold text-slate-900 line-clamp-1">${compName}</div>
+                            <div class="text-[11px] text-slate-500 line-clamp-1">${jobTitle}</div>
+                          </td>
+                          <td class="py-2.5 px-3 font-bold text-indigo-900">
+                            ${caName}
+                          </td>
+                          <td class="py-2.5 px-3 font-extrabold text-indigo-700">
+                            ${s.phase}
+                          </td>
+                          <td class="py-2.5 px-3 font-medium text-slate-600">
+                            ${s.progressStatus || '-'}
+                          </td>
+                          <td class="py-2.5 px-3 text-center">
+                            <span class="px-2 py-0.5 rounded font-black text-xs ${
+                              s.displayYomi === 100 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                              s.displayYomi === 75 ? 'bg-indigo-100 text-indigo-800 border border-indigo-300' :
+                              s.displayYomi === 50 ? 'bg-sky-100 text-sky-800 border border-sky-300' :
+                              s.displayYomi === 25 ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                              'bg-slate-100 text-slate-600 border border-slate-300'
+                            }">
+                              ${s.displayYomi}%
+                            </span>
+                          </td>
+                          <td class="py-2.5 px-3 text-center space-x-1">
+                            <button class="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded text-[11px] transition shadow-2xs btn-open-detail" data-selection-id="${s.selectionId}">
+                              詳細
+                            </button>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              `}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
 
     container.innerHTML = `
-      <div class="space-y-5">
-        <!-- 画面ヘッダー -->
-        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="space-y-4">
+        <!-- ページタイトル ＆ コントロール (指示書 3, 4, 20, 22, 30項) -->
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
-              企業対応
+            <h2 class="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+              <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+              ヨミ表
             </h2>
-            <p class="text-xs text-slate-500 mt-1">※企業に対する今なすべき次行動・アプローチ管理画面です。</p>
+            <p class="text-xs text-slate-500 mt-1">選考案件をヨミ順に確認できます（総対象案件: ${enriched.length}件）</p>
           </div>
 
           <div class="flex items-center space-x-3 text-xs">
-            <label class="inline-flex items-center space-x-1.5 font-bold text-slate-700 cursor-pointer">
-              <input type="checkbox" id="chk-ra-only-mine" ${filterOnlyMine ? 'checked' : ''} class="rounded text-amber-600">
-              <span>自分の担当企業のみ</span>
-            </label>
-
-            <select id="select-ra-filter" class="bg-slate-50 border border-slate-300 font-bold rounded px-3 py-2 text-slate-800 focus:outline-none">
-              <option value="">すべてのRA担当</option>
-              ${raConsultants.map(c => `<option value="${c.consultantId}" ${filterRaId === c.consultantId ? 'selected' : ''}>${c.name} (RA)</option>`).join('')}
+            <select id="select-yomi-ca-filter" class="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 font-bold focus:outline-none focus:bg-white focus:border-indigo-600">
+              <option value="">担当CA: 全体</option>
+              ${consultants.map(c => `<option value="${c.consultantId}" ${filterCaId === c.consultantId ? 'selected' : ''}>${c.name}</option>`).join('')}
             </select>
+
+            <input type="text" id="input-yomi-search" value="${searchKw}" placeholder="候補者・企業・求人・CAで検索..." class="bg-slate-50 border border-slate-300 rounded px-2.5 py-1 text-xs text-slate-800 focus:outline-none focus:bg-white focus:border-indigo-600 w-56">
           </div>
         </div>
 
-        <!-- 検索 ＆ フィルター (指示書 15項) -->
-        <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div class="flex flex-wrap items-center gap-3">
-            <input type="text" id="input-action-search-kw" value="${searchKw}" placeholder="企業名で検索..." class="bg-slate-50 border border-slate-300 rounded px-3 py-1.5 focus:outline-none focus:bg-white focus:border-indigo-600 min-w-[200px]">
-
-            <select id="select-action-priority" class="bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 focus:outline-none font-bold text-indigo-900">
-              <option value="">すべての絞り込み</option>
-              <option value="expired" ${filterPriority === 'expired' ? 'selected' : ''}>🚨 期限超過あり</option>
-              <option value="today" ${filterPriority === 'today' ? 'selected' : ''}>⏰ 本日対応あり</option>
-            </select>
-          </div>
-
-          <div class="flex items-center space-x-2">
-            <span class="text-slate-500 font-semibold">並び順:</span>
-            <select id="select-action-sort" class="bg-slate-100 border border-slate-300 rounded px-2.5 py-1.5 font-bold text-slate-800 focus:outline-none">
-              <option value="priority_default" ${sortBy === 'priority_default' ? 'selected' : ''}>優先度が高い順 (初期表示)</option>
-              <option value="action_count_desc" ${sortBy === 'action_count_desc' ? 'selected' : ''}>対応対象件数が多い順</option>
-              <option value="name_asc" ${sortBy === 'name_asc' ? 'selected' : ''}>企業名順</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- 企業対応リスト アコーディオンテーブル (指示書 12, 13, 14項) -->
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden space-y-2">
-          <div class="px-4 py-3 bg-slate-900 text-white flex items-center justify-between">
-            <h3 class="font-bold text-xs">企業一覧 (${filtered.length}社) <span class="text-[11px] font-normal text-slate-400">（行をクリックすると対応案件を展開します）</span></h3>
-          </div>
-
-          <div class="divide-y divide-slate-200 text-xs">
-            ${filtered.length === 0 ? `
-              <div class="text-center py-8 text-slate-400">該当する対応企業がありません。</div>
-            ` : filtered.map(card => {
-              const comp = card.company;
-              const ra = card.primaryRa;
-              const isOpen = openCompanyIds.has(comp.companyId);
-              const showMode = showModeMap[comp.companyId] || 'action_needed';
-
-              let displaySelections = card.actionNeededSelections;
-              if (showMode === 'in_progress') displaySelections = card.activeSelections;
-              if (showMode === 'all') displaySelections = card.allSelections;
-
-              return `
-                <!-- 企業ヘッダー行 (指示書 13, 14項) -->
-                <div class="action-company-row hover:bg-indigo-50/50 transition cursor-pointer p-3 flex flex-col md:flex-row md:items-center justify-between gap-3 ${isOpen ? 'bg-indigo-50/70 border-l-4 border-indigo-600' : ''}" data-company-id="${comp.companyId}">
-                  <!-- 左側: 企業名 ＆ ランク ＆ RA -->
-                  <div class="flex items-center space-x-3 min-w-[220px]">
-                    <span class="font-bold text-indigo-600 text-xs">${isOpen ? '▼' : '▶'}</span>
-                    <div>
-                      <div class="font-extrabold text-slate-900 text-xs flex items-center gap-2">
-                        <span>${comp.name}</span>
-                        ${comp.rank ? `<span class="text-[9px] px-1.5 py-0.2 rounded font-black bg-slate-100 text-slate-800 border border-slate-300">${comp.rank}</span>` : ''}
-                      </div>
-                      <div class="text-[10px] text-slate-500 font-medium">担当RA: ${ra ? ra.name : '未設定'}</div>
-                    </div>
-                  </div>
-
-                  <!-- 中央: 対応対象件数 ＆ 内訳バッジ (指示書 13項) -->
-                  <div class="flex items-center space-x-2 text-[11px]">
-                    <span class="font-extrabold px-2.5 py-1 rounded border ${card.actionNeededCount > 0 ? 'bg-rose-100 text-rose-900 border-rose-300 font-black' : 'bg-slate-100 text-slate-600 border-slate-200'}">
-                      対応 ${card.actionNeededCount}件
-                    </span>
-                    ${card.expiredCount > 0 ? `<span class="px-2 py-0.5 rounded text-[10px] font-black bg-rose-600 text-white animate-pulse">期限超過 ${card.expiredCount}件</span>` : ''}
-                    ${card.todayCount > 0 ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">本日対応 ${card.todayCount}件</span>` : ''}
-                    ${card.waitingCount > 0 ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-900 border border-blue-200">回答待ち ${card.waitingCount}件</span>` : ''}
-                  </div>
-
-                  <!-- 右側: 最優先の次アクション (代表1件表示) ＆ 操作 (指示書 14, 26項) -->
-                  <div class="flex items-center justify-between md:justify-end space-x-3 flex-1">
-                    <div class="text-right max-w-xs truncate hidden sm:block">
-                      <span class="text-[10px] font-bold text-slate-500 block">最優先アクション</span>
-                      <span class="text-[11px] font-bold text-indigo-900 truncate block" title="${card.topActionText}">⚡ ${card.topActionText}</span>
-                    </div>
-
-                    <div class="flex items-center space-x-2">
-                      <button class="btn-create-email-comp stop-propagation px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded text-xs shadow-2xs transition" data-company-id="${comp.companyId}">
-                        メール作成
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- アコーディオン展開エリア: 候補者行 (指示書 16, 17, 18, 19, 20, 21, 23, 24, 25項) -->
-                ${isOpen ? `
-                  <div class="bg-slate-50 p-3 border-t border-slate-200 space-y-3">
-                    <!-- アコーディオン上部コントロール -->
-                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
-                      <div class="flex items-center space-x-3 text-xs">
-                        <span class="font-bold text-slate-800">表示切替:</span>
-                        <div class="flex items-center space-x-1 bg-white p-0.5 rounded border border-slate-300 font-bold text-[11px]">
-                          <label class="px-2 py-0.5 rounded cursor-pointer ${showMode === 'action_needed' ? 'bg-indigo-600 text-white' : 'text-slate-600'}">
-                            <input type="radio" name="show_mode_${comp.companyId}" value="action_needed" ${showMode === 'action_needed' ? 'checked' : ''} class="hidden radio-show-mode" data-company-id="${comp.companyId}">
-                            対応対象のみ (${card.actionNeededCount})
-                          </label>
-                          <label class="px-2 py-0.5 rounded cursor-pointer ${showMode === 'in_progress' ? 'bg-indigo-600 text-white' : 'text-slate-600'}">
-                            <input type="radio" name="show_mode_${comp.companyId}" value="in_progress" ${showMode === 'in_progress' ? 'checked' : ''} class="hidden radio-show-mode" data-company-id="${comp.companyId}">
-                            進行中すべて (${card.inProgressCount})
-                          </label>
-                          <label class="px-2 py-0.5 rounded cursor-pointer ${showMode === 'all' ? 'bg-indigo-600 text-white' : 'text-slate-600'}">
-                            <input type="radio" name="show_mode_${comp.companyId}" value="all" ${showMode === 'all' ? 'checked' : ''} class="hidden radio-show-mode" data-company-id="${comp.companyId}">
-                            過去含む (${card.allSelections.length})
-                          </label>
-                        </div>
-                      </div>
-
-                      <div class="flex items-center space-x-2">
-                        <button class="btn-mark-contacted-selected-action px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded text-xs transition" data-company-id="${comp.companyId}">
-                          選択案件を連絡済みにする
-                        </button>
-                        <button class="btn-create-email-selected-action px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-xs transition" data-company-id="${comp.companyId}">
-                          選択した案件でメール作成
-                        </button>
-                      </div>
-                    </div>
-
-                    <!-- 候補者行リスト (3ブロック整理: 左:案件 / 中央:対応情報 / 右:操作) (指示書 17項) -->
-                    <div class="space-y-2">
-                      ${displaySelections.length === 0 ? `
-                        <div class="text-center py-4 text-slate-400 bg-white rounded border border-slate-200">対象案件はありません。</div>
-                      ` : displaySelections.map(s => {
-                        const isEnded = s.phase === '選考終了' || s.phase === '内定辞退';
-                        const cand = candidatesMap.get(s.candidateId);
-                        const job = jobsMap.get(s.jobId);
-                        const ca = consultantsMap.get(s.caId || s.caConsultantId);
-                        const isNeeded = isActionNeededSelection(s, today);
-
-                        const nextTarget = s.nextActionTarget || (s.companyActionStatus === 'CA確認待ち' ? 'CA' : '企業');
-                        const isTargetCa = nextTarget === 'CA';
-                        const targetBadgeClass = isTargetCa ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-indigo-100 text-indigo-900 border-indigo-200';
-                        const targetLabel = isTargetCa ? '【CA確認】' : '【企業対応】';
-
-                        const uObj = s.urgencyInfo || {};
-
-                        return `
-                          <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3 hover:border-indigo-300 transition ${isEnded ? 'bg-slate-100/80 text-slate-400' : ''}">
-                            <!-- チェックボックス & 左ブロック: 案件情報 (指示书 17項) -->
-                            <div class="flex items-start space-x-2.5 min-w-[240px]">
-                              <input type="checkbox" class="chk-action-cand-item mt-1" data-company-id="${comp.companyId}" data-selection-id="${s.selectionId}" ${isNeeded ? 'checked' : ''}>
-                              <div>
-                                <div class="font-extrabold text-slate-900 text-xs flex items-center gap-1.5">
-                                  <span>${normalizeCandidateName(cand ? cand.name : s.candidateName)} 様</span>
-                                  <span class="text-[10px] text-slate-500 font-normal">(CA: ${ca ? ca.name.split(' ')[0] : s.caName || '-'})</span>
-                                </div>
-                                <div class="text-[10px] text-slate-500 truncate max-w-[200px]" title="${job ? (job.title || job.jobName) : s.jobName}">
-                                  ${job ? (job.title || job.jobName) : s.jobName}
-                                </div>
-                                <div class="text-[10px] font-bold text-indigo-900 mt-0.5">
-                                  ${s.phase} <span class="text-slate-400 font-normal">｜ ${s.progressStatus}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <!-- 中央ブロック: 対応情報 (次の対応・対応先・期限・ステータス) (指示書 17, 18, 19, 20, 21項) -->
-                            <div class="flex-1 space-y-1">
-                              <div class="flex flex-wrap items-center gap-1.5">
-                                <span class="text-[10px] font-bold px-1.5 py-0.2 rounded border ${targetBadgeClass}">${targetLabel}</span>
-                                <span class="font-extrabold text-xs text-indigo-950">
-                                  ${s.nextAction || '要確認'}
-                                </span>
-                                ${uObj.badgeClass ? `<span class="px-1.5 py-0.2 rounded text-[9px] font-extrabold ${uObj.badgeClass}">${uObj.label}</span>` : ''}
-                              </div>
-
-                              <div class="flex flex-wrap items-center gap-3 text-[10px] text-slate-600">
-                                ${s.companyConfirmationItem ? `<span class="text-slate-700 truncate max-w-sm" title="${s.companyConfirmationItem}">確認事項: ${s.companyConfirmationItem}</span>` : ''}
-                                <span class="font-mono text-slate-500">期限: ${s.actionDeadline || s.nextCompanyContactDate || '未設定'}</span>
-                                <span class="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">ステータス: ${s.companyActionStatus || '未対応'}</span>
-                              </div>
-                            </div>
-
-                            <!-- 右ブロック: ワンクリック操作 (指示書 17項) -->
-                            <div class="flex flex-wrap items-center space-x-1 justify-end shrink-0">
-                              <button class="btn-action-single-email px-2 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded font-bold text-[10px] transition" data-company-id="${comp.companyId}" data-selection-id="${s.selectionId}">
-                                メール作成
-                              </button>
-                              <button data-ra-action="CONTACTED" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded font-bold text-[10px] transition">
-                                連絡済
-                              </button>
-                              <button data-ra-action="PASS" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-[10px] transition">
-                                通過
-                              </button>
-                              <button data-ra-action="REJECT" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold text-[10px] transition">
-                                見送り
-                              </button>
-                              <button data-ra-action="DATES_AVAILABLE" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded font-bold text-[10px] transition">
-                                日程候補あり
-                              </button>
-                              <button class="btn-action-cand-detail px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold text-[10px] transition" data-id="${s.selectionId}">
-                                詳細
-                              </button>
-                            </div>
-                          </div>
-                        `;
-                      }).join('')}
-                    </div>
-                  </div>
-                ` : ''}
-              `;
-            }).join('')}
-          </div>
+        <!-- 各ヨミ％グループのリスト -->
+        <div>
+          ${groupsHTML}
         </div>
       </div>
     `;
 
-    if (options.preserveScroll !== false && savedScrollY > 0) {
-      setTimeout(() => {
-        window.scrollTo({ top: savedScrollY, behavior: 'instant' });
-      }, 0);
+    if (savedScrollY > 0) window.scrollTo(0, savedScrollY);
+
+    if (options.preserveFocusId) {
+      const inputEl = container.querySelector('#' + options.preserveFocusId);
+      if (inputEl) {
+        inputEl.focus();
+        if (options.selectionStart !== undefined) inputEl.setSelectionRange(options.selectionStart, options.selectionStart);
+      }
     }
 
-    container.querySelectorAll('.action-company-row').forEach(row => {
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('.stop-propagation')) return;
+    // イベントバインド
+    container.querySelector('#select-yomi-ca-filter')?.addEventListener('change', (e) => {
+      filterCaId = e.target.value;
+      saveYomiState({ filterCaId });
+      updateView();
+    });
 
-        const cId = row.getAttribute('data-company-id');
-        if (openCompanyIds.has(cId)) {
-          openCompanyIds.delete(cId);
+    const searchInputEl = container.querySelector('#input-yomi-search');
+    if (searchInputEl) {
+      let isComposing = false;
+      searchInputEl.addEventListener('compositionstart', () => { isComposing = true; });
+      searchInputEl.addEventListener('compositionend', (e) => {
+        isComposing = false;
+        searchKw = e.target.value;
+        saveYomiState({ searchKw });
+        updateView({ preserveFocusId: 'input-yomi-search', selectionStart: e.target.selectionStart });
+      });
+      searchInputEl.addEventListener('input', (e) => {
+        if (isComposing) return;
+        searchKw = e.target.value;
+        saveYomiState({ searchKw });
+        updateView({ preserveFocusId: 'input-yomi-search', selectionStart: e.target.selectionStart });
+      });
+    }
+
+    container.querySelectorAll('.btn-toggle-yomi-group').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-group-key');
+        if (collapsedGroups.has(key)) {
+          collapsedGroups.delete(key);
         } else {
-          openCompanyIds.add(cId);
+          collapsedGroups.add(key);
         }
-
-        saveActionState({
-          openCompanyIds: Array.from(openCompanyIds),
-          scrollTop: window.scrollY || document.documentElement.scrollTop
-        });
+        saveYomiState({ collapsedGroups: Array.from(collapsedGroups) });
         updateView({ preserveScroll: true });
       });
     });
 
-    container.querySelectorAll('.stop-propagation').forEach(btn => {
-      btn.addEventListener('click', (e) => e.stopPropagation());
-    });
-
-    container.querySelector('#chk-action-only-mine')?.addEventListener('change', (e) => { filterOnlyMine = e.target.checked; updateView({ preserveScroll: true }); });
-    container.querySelector('#select-action-ra-filter')?.addEventListener('change', (e) => { filterRaId = e.target.value; updateView({ preserveScroll: true }); });
-    container.querySelector('#input-action-search-kw')?.addEventListener('input', (e) => { searchKw = e.target.value; updateView({ preserveScroll: true }); });
-    container.querySelector('#select-action-priority')?.addEventListener('change', (e) => { filterPriority = e.target.value; updateView({ preserveScroll: true }); });
-    container.querySelector('#select-action-sort')?.addEventListener('change', (e) => { sortBy = e.target.value; updateView({ preserveScroll: true }); });
-
-    container.querySelectorAll('.radio-show-mode').forEach(radio => {
-      radio.addEventListener('change', (e) => {
-        const cId = radio.getAttribute('data-company-id');
-        showModeMap[cId] = radio.value;
-        updateView({ preserveScroll: true });
-      });
-    });
-
-    container.querySelectorAll('.btn-create-email-selected-action').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const cId = btn.getAttribute('data-company-id');
-        const checkedItems = container.querySelectorAll(`.chk-action-cand-item[data-company-id="${cId}"]:checked`);
-        const selIds = Array.from(checkedItems).map(item => item.getAttribute('data-selection-id'));
-
-        if (selIds.length === 0) {
-          alert('メールに含める選考案件にチェックを入れてください。');
-          return;
-        }
-
-        saveActionState({ scrollTop: window.scrollY || document.documentElement.scrollTop });
-        onOpenEmailComposer(cId, selIds);
-      });
-    });
-
-    container.querySelectorAll('.btn-create-email-comp').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const cId = btn.getAttribute('data-company-id');
-        const card = companyActionCards.find(c => c.company.companyId === cId);
-        const selIds = card ? card.actionNeededSelections.map(s => s.selectionId) : [];
-
-        saveActionState({ scrollTop: window.scrollY || document.documentElement.scrollTop });
-        onOpenEmailComposer(cId, selIds.length > 0 ? selIds : null);
-      });
-    });
-
-    container.querySelectorAll('.btn-action-single-email').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const cId = btn.getAttribute('data-company-id');
-        const selId = btn.getAttribute('data-selection-id');
-        saveActionState({ scrollTop: window.scrollY || document.documentElement.scrollTop });
-        onOpenEmailComposer(cId, [selId]);
-      });
-    });
-
-    container.querySelectorAll('.btn-mark-contacted-selected-action').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const cId = btn.getAttribute('data-company-id');
-        const checkedItems = container.querySelectorAll(`.chk-action-cand-item[data-company-id="${cId}"]:checked`);
-        const selIds = Array.from(checkedItems).map(item => item.getAttribute('data-selection-id'));
-
-        if (selIds.length === 0) {
-          alert('連絡済みにする選考案件にチェックを入れてください。');
-          return;
-        }
-
-        if (confirm(`選択した ${selIds.length} 件の選考案件を連絡済みに更新しますか？`)) {
-          selIds.forEach(id => {
-            store.updateSelection(id, { companyActionStatus: '完了' }, '企業対応リストからの完了更新');
-          });
-          alert('選択した選考案件を連絡済みに更新しました。');
-          updateView({ preserveScroll: true });
-        }
-      });
-    });
-
-    container.querySelectorAll('.btn-action-single-contacted').forEach(btn => {
+    container.querySelectorAll('.btn-open-detail').forEach(btn => {
       btn.addEventListener('click', () => {
         const selId = btn.getAttribute('data-selection-id');
-        store.updateSelection(selId, { companyActionStatus: '完了' }, '個別の企業対応完了');
-        updateView({ preserveScroll: true });
-      });
-    });
-
-    container.querySelectorAll('button[data-ra-action]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const selId = btn.getAttribute('data-sel-id');
-        const act = btn.getAttribute('data-ra-action');
-        saveActionState({ scrollTop: window.scrollY || document.documentElement.scrollTop });
-        store.handleRaAction(selId, act);
-        updateView({ preserveScroll: true });
-      });
-    });
-
-    container.querySelectorAll('.btn-action-cand-detail').forEach(btn => {
-      btn.addEventListener('click', () => {
-        saveActionState({ scrollTop: window.scrollY || document.documentElement.scrollTop });
-        onOpenDetail(btn.getAttribute('data-id'));
+        if (selId && onOpenDetail) onOpenDetail(selId);
       });
     });
   }
 
-  updateView({ preserveScroll: true });
+  updateView();
 }

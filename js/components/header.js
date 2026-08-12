@@ -24,7 +24,7 @@ export function renderHeader(container, { onOpenNewSelection, onOpenCsvImport, a
               選考進捗・ヨミ管理システム
               <span class="text-xs bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded border border-indigo-400/30">サンクスパートナーズ</span>
             </h1>
-            <p class="text-xs text-slate-400">${activeViewTitle || '企業対応'}</p>
+            <p class="text-xs text-slate-400">${activeViewTitle || 'ヨミ表'}</p>
           </div>
         </div>
 
