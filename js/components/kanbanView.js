@@ -104,15 +104,20 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
       caCheck: raActionSelections.filter(s => s.companyActionStatus === 'CA確認待ち' || s.urgencyInfo.code === 'ca_check').length
     };
 
-    // 下部ホワイトボードのカラム構成 (指示書 4, 5, 6, 7項)
+    // 下部ホワイトボードのカラム構成 (指示書 4, 5, 6, 7, 12項)
     let columns = [];
     if (selectedAxisMode === 'ca') {
-      // 全CAを表示 (指示書 4, 5項: ログインCAへの自動絞り込みを解除)
+      // 全CAを表示 (指示書 4, 5項: 登録されている全CAを網羅)
       let targetCas = consultants.filter(c => {
         if (c.isArchived || c.status === 'inactive') return false;
         if (c.roles && Array.isArray(c.roles)) return c.roles.includes('CA') || c.roles.includes('ADMIN');
-        return c.roleType === 'CA' || c.roleType === 'ADMIN';
+        return c.roleType === 'CA' || c.roleType === 'ADMIN' || !c.roleType;
       });
+
+      // もしCA登録リストが空の場合のフォールバック
+      if (targetCas.length === 0) {
+        targetCas = consultants;
+      }
 
       if (filterCaId) {
         targetCas = targetCas.filter(c => c.consultantId === filterCaId);
@@ -123,11 +128,23 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
         targetCas = targetCas.filter(c => c.name.toLowerCase().includes(kw));
       }
 
+      const registeredCaIds = new Set(targetCas.map(c => c.consultantId));
+
       columns = targetCas.map(c => ({
         id: c.consultantId,
         title: `${c.name} (CA)`,
-        filterFn: (s) => s.caId === c.consultantId || s.caConsultantId === c.consultantId
+        filterFn: (s) => (s.caId && s.caId === c.consultantId) || (s.caConsultantId && s.caConsultantId === c.consultantId) || (s.caName && s.caName.includes(c.name.split(' ')[0]))
       }));
+
+      // caId が未割り当ての案件が存在する場合の救済用「担当CA未設定」列 (指示書 12項)
+      const hasUnassignedCa = enrichedSelections.some(s => !s.caId && !s.caConsultantId && !registeredCaIds.has(s.caId));
+      if (hasUnassignedCa) {
+        columns.push({
+          id: 'UNASSIGNED_CA',
+          title: '担当CA未設定',
+          filterFn: (s) => !s.caId || !registeredCaIds.has(s.caId)
+        });
+      }
     } else {
       // 企業別表示 (指示書 6, 7項: 現在進行中の選考案件が1件以上ある企業のみ抽出)
       const activeCompanyIds = new Set(enrichedSelections.filter(s => s.phase !== '内定辞退').map(s => s.companyId));
@@ -223,12 +240,6 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
               <button id="btn-open-company-actions-page" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold rounded-lg text-xs transition shadow-sm border border-indigo-400 flex items-center gap-1.5 ml-2">
                 <span>企業対応を開く</span>
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
-              </button>
-            </div>
-          ` : ''}
-        </div>
-            </div>
-
         </div>
 
         <!-- 【下部】現在のCA別ホワイトボード (5区分フェーズ行 ＆ 既存レイアウト保持) (指示書 3, 5, 8, 9, 24, 25, 26項) -->
