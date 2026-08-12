@@ -410,7 +410,7 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
     });
   }
 
-  updateView({ preserveScroll: true });
+  updateView();
 }
 
 function renderCaCardHTML(s, isHighlighted, isCompanyAxis) {
