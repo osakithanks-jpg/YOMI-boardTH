@@ -234,7 +234,7 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
         <!-- 【下部】現在のCA別ホワイトボード (5区分フェーズ行 ＆ 既存レイアウト保持) (指示書 3, 5, 8, 9, 24, 25, 26項) -->
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-4 space-y-4">
           <div id="kanban-horizontal-scroll-container" class="overflow-x-auto">
-            <div class="min-w-[800px] space-y-4">
+            <div class="space-y-4" style="min-width: max-content; width: 100%;">
               ${sorted5Phases.map((pObj) => {
                 // ホワイトボード5区分グループに属する案件のフィルタリング
                 const groupSels = enrichedSelections.filter(s => {
@@ -268,7 +268,7 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
                     </div>
 
                     <!-- カラム（CA別・チーム全体等）グリッド (指示書 2, 8, 9項) -->
-                    <div class="grid grid-cols-${Math.min(columns.length, 4)} divide-x divide-slate-200 p-2 gap-2 bg-slate-100/50 min-h-[140px]">
+                    <div class="p-2 gap-3 bg-slate-100/50 min-h-[140px]" style="display: grid; grid-template-columns: repeat(${columns.length}, minmax(240px, 1fr));">
                       ${columns.map(col => {
                         const colGroupSels = groupSels.filter(s => col.filterFn(s));
                         const colYomi = colGroupSels.reduce((sum, s) => sum + (s.phase === '内定辞退' ? 0 : Number(s.yomi || 0)), 0);
