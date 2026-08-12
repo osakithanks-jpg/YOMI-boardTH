@@ -5403,16 +5403,41 @@ function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyActions 
       saveKanbanState({ axisMode: 'company' });
       updateView();
     });
-    container.querySelector('#input-wb-ca-search')?.addEventListener('input', (e) => {
-      searchKeyword = e.target.value;
-      saveKanbanState({ searchKeyword });
-      updateView({ preserveFocusId: 'input-wb-ca-search', selectionStart: e.target.selectionStart });
-    });
-    container.querySelector('#input-wb-comp-search')?.addEventListener('input', (e) => {
-      filterCompanySearch = e.target.value;
-      saveKanbanState({ filterCompanySearch });
-      updateView();
-    });
+    let isComposing = false;
+
+    const caSearchEl = container.querySelector('#input-wb-ca-search');
+    if (caSearchEl) {
+      caSearchEl.addEventListener('compositionstart', () => { isComposing = true; });
+      caSearchEl.addEventListener('compositionend', (e) => {
+        isComposing = false;
+        searchKeyword = e.target.value;
+        saveKanbanState({ searchKeyword });
+        updateView({ preserveFocusId: 'input-wb-ca-search', selectionStart: e.target.selectionStart });
+      });
+      caSearchEl.addEventListener('input', (e) => {
+        if (isComposing) return;
+        searchKeyword = e.target.value;
+        saveKanbanState({ searchKeyword });
+        updateView({ preserveFocusId: 'input-wb-ca-search', selectionStart: e.target.selectionStart });
+      });
+    }
+
+    const compSearchEl = container.querySelector('#input-wb-comp-search');
+    if (compSearchEl) {
+      compSearchEl.addEventListener('compositionstart', () => { isComposing = true; });
+      compSearchEl.addEventListener('compositionend', (e) => {
+        isComposing = false;
+        filterCompanySearch = e.target.value;
+        saveKanbanState({ filterCompanySearch });
+        updateView({ preserveFocusId: 'input-wb-comp-search', selectionStart: e.target.selectionStart });
+      });
+      compSearchEl.addEventListener('input', (e) => {
+        if (isComposing) return;
+        filterCompanySearch = e.target.value;
+        saveKanbanState({ filterCompanySearch });
+        updateView({ preserveFocusId: 'input-wb-comp-search', selectionStart: e.target.selectionStart });
+      });
+    }
     container.querySelector('#btn-toggle-ra-summary')?.addEventListener('click', () => {
       isRaAreaOpen = !isRaAreaOpen;
       saveKanbanState({ isRaAreaOpen });
