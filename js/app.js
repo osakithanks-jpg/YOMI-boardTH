@@ -200,70 +200,13 @@ class App {
   }
 
   renderTerminalBDebugPanel() {
-    const panel = document.getElementById('terminal-b-debug-panel');
-    if (!panel) return;
-
-    const info = window.TERMINAL_B_DEBUG || {};
-
-    panel.innerHTML = `
-      <div style="background: rgba(15, 23, 42, 0.95); color: #f8fafc; font-family: monospace; font-size: 10px; padding: 10px 14px; border-radius: 8px; border: 1px solid #3b82f6; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 320px; backdrop-filter: blur(4px);">
-        <div style="font-weight: 900; color: #60a5fa; border-bottom: 1px solid #334155; padding-bottom: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-          <span>TERMINAL B DIAGNOSIS PANEL</span>
-          <span style="font-size: 9px; background: #1e293b; padding: 1px 5px; border-radius: 4px; color: #4ade80;">LIVE</span>
-        </div>
-        <div style="line-height: 1.45;">
-          <div><strong style="color:#94a3b8;">Project ID:</strong> ${info.projectId || '-'}</div>
-          <div><strong style="color:#94a3b8;">Database ID:</strong> ${info.databaseId || '(default)'}</div>
-          <div><strong style="color:#94a3b8;">対象コレクション:</strong> ${info.targetCollection || 'selections'}</div>
-          <div><strong style="color:#94a3b8;">getDocsFromServer 取得件数:</strong> <span style="color:#60a5fa; font-weight:bold;">${info.serverReadCount || 0}</span></div>
-          <div><strong style="color:#94a3b8;">onSnapshot 取得件数:</strong> <span style="color:#4ade80; font-weight:bold;">${info.snapshotCount || 0}</span></div>
-          <div><strong style="color:#94a3b8;">onSnapshot開始:</strong> ${info.snapshotStarted ? 'true' : 'false'}</div>
-          <div><strong style="color:#94a3b8;">onSnapshot受信回数:</strong> ${info.snapshotReceiveCount || 0}</div>
-          <div><strong style="color:#94a3b8;">fromCache:</strong> <span style="color:${info.fromCache ? '#facc15' : '#4ade80'};">${info.fromCache ? 'true' : 'false'}</span></div>
-          <div><strong style="color:#94a3b8;">hasPendingWrites:</strong> ${info.hasPendingWrites ? 'true' : 'false'}</div>
-          <div><strong style="color:#94a3b8;">最終受信時刻:</strong> ${info.lastReceivedAt || '-'}</div>
-          <div><strong style="color:#94a3b8;">エラーコード:</strong> <span style="color:${info.errorCode === 'none' ? '#94a3b8' : '#f87171'}; font-weight:bold;">${info.errorCode}</span></div>
-          <div><strong style="color:#94a3b8;">エラーメッセージ:</strong> <span style="color:${info.errorMessage === 'none' ? '#94a3b8' : '#f87171'}; font-weight:bold;">${info.errorMessage}</span></div>
-        </div>
-      </div>
-    `;
+    // 利用者画面へのデバッグパネルUI描画は完全に無効化（Firestore通信・ログ記録・リアルタイム処理は維持）
+    return;
   }
 
   renderDebugPanel(rawCount = 0) {
-    const panelContainer = document.getElementById('data-source-debug-panel');
-    if (!panelContainer) return;
-
-    const info = window.DATA_SOURCE_DEBUG_INFO || {};
-    info.rawCount = rawCount;
-    info.filteredCount = rawCount;
-
-    panelContainer.innerHTML = `
-      <div style="background: rgba(15, 23, 42, 0.95); color: #f8fafc; font-family: monospace; font-size: 10px; padding: 10px 14px; border-radius: 8px; border: 1px solid #3b82f6; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-width: 320px; backdrop-filter: blur(4px);">
-        <div style="font-weight: 900; color: #60a5fa; border-bottom: 1px solid #334155; padding-bottom: 4px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-          <span>DATA SOURCE DEBUG</span>
-          <span style="font-size: 9px; background: #1e293b; padding: 1px 5px; border-radius: 4px; color: #94a3b8;">LIVE</span>
-        </div>
-        <div style="line-height: 1.45;">
-          <div><strong style="color:#94a3b8;">Project ID:</strong> ${info.projectId || '-'}</div>
-          <div><strong style="color:#94a3b8;">Database ID:</strong> ${info.databaseId || '(default)'}</div>
-          <div><strong style="color:#94a3b8;">Collection:</strong> ${info.collection || 'selections'}</div>
-          <div><strong style="color:#94a3b8;">Document path:</strong> ${info.documentPath || 'selections/{docId}'}</div>
-          <div><strong style="color:#94a3b8;">Auth UID:</strong> ${info.authUid || 'unauthenticated'}</div>
-          <div><strong style="color:#94a3b8;">Data source:</strong> <span style="color:${(info.dataSource || '').includes('server') ? '#4ade80' : '#facc15'}; font-weight:bold;">${info.dataSource || 'unknown'}</span></div>
-          <div><strong style="color:#94a3b8;">Loaded count:</strong> ${info.loadedCount || 0}</div>
-          <div><strong style="color:#94a3b8;">First doc ID:</strong> ${info.firstDocId || '-'}</div>
-          <div><strong style="color:#94a3b8;">Last loaded at:</strong> ${info.lastLoadedAt || '-'}</div>
-          <div><strong style="color:#94a3b8;">localStorage count:</strong> ${info.localStorageCount || 0}</div>
-          <div><strong style="color:#94a3b8;">IndexedDB persistence:</strong> ${info.indexedDbPersistence ? 'enabled' : 'disabled'}</div>
-          <div style="border-t: 1px dashed #334155; margin-top: 4px; padding-top: 4px;">
-            <strong style="color:#94a3b8;">Raw / Filtered count:</strong> ${info.rawCount} / ${info.filteredCount}
-          </div>
-          <div><strong style="color:#94a3b8;">Test doc ID:</strong> ${info.testDocId || 'TEST_SHARED_RECORD_20260802'}</div>
-          <div><strong style="color:#94a3b8;">Test doc exists:</strong> <span style="color:${info.testDocExists ? '#4ade80' : '#f87171'}; font-weight:bold;">${info.testDocExists ? 'true' : 'false'}</span></div>
-          <div><strong style="color:#94a3b8;">Test doc val:</strong> ${info.testDocValue || '-'}</div>
-        </div>
-      </div>
-    `;
+    // 利用者画面へのデバッグパネルUI描画は完全に無効化
+    return;
   }
 }
 
