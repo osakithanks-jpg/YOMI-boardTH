@@ -240,6 +240,9 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
               <button id="btn-open-company-actions-page" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold rounded-lg text-xs transition shadow-sm border border-indigo-400 flex items-center gap-1.5 ml-2">
                 <span>企業対応を開く</span>
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+              </button>
+            </div>
+          ` : ''}
         </div>
 
         <!-- 【下部】現在のCA別ホワイトボード (5区分フェーズ行 ＆ 既存レイアウト保持) (指示書 3, 5, 8, 9, 24, 25, 26項) -->
