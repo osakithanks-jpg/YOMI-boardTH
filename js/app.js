@@ -131,8 +131,11 @@ class App {
         });
         break;
 
+      // 旧ビューからのリダイレクト対応 (Step 28項)
+      case VIEWS.SELECTIONS:
       case VIEWS.CA:
-        renderCaView(contentContainer, {
+      case VIEWS.CONSULTANTS:
+        renderDashboard(contentContainer, {
           onOpenDetail: (selectionId) => {
             openSelectionDetailModal(selectionId, () => this.render());
           }
@@ -140,31 +143,12 @@ class App {
         break;
 
       case VIEWS.RA:
-        renderRaView(contentContainer, {
-          onOpenDetail: (selectionId) => {
-            openSelectionDetailModal(selectionId, () => this.render());
-          },
-          onOpenEmailComposer: (companyId, selectionIds = null) => {
-            openEmailComposerModal(companyId, () => this.render(), selectionIds);
-          }
-        });
-        break;
-
-      case VIEWS.COMPANY_ACTIONS:
         renderCompanyActionListView(contentContainer, {
           onOpenDetail: (selectionId) => {
             openSelectionDetailModal(selectionId, () => this.render());
           },
           onOpenEmailComposer: (companyId, selectionIds = null) => {
             openEmailComposerModal(companyId, () => this.render(), selectionIds);
-          }
-        });
-        break;
-
-      case VIEWS.CONSULTANTS:
-        renderConsultantView(contentContainer, this.viewFilters.consultantId || '', {
-          onOpenDetail: (selectionId) => {
-            openSelectionDetailModal(selectionId, () => this.render());
           }
         });
         break;

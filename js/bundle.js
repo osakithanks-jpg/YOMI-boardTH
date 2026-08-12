@@ -3703,34 +3703,14 @@ function renderSidebar(container, activeView, onSelectView) {
       icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 00-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>`
     },
     {
-      id: VIEWS.SELECTIONS,
-      title: '選考一覧',
-      icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>`
-    },
-    {
       id: VIEWS.KANBAN,
       title: 'ホワイトボード',
       icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 01-2 2m0 10V7m6 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 01-2 2"></path></svg>`
     },
     {
-      id: VIEWS.CA,
-      title: 'CA管理画面',
-      icon: `<svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>`
-    },
-    {
-      id: VIEWS.RA,
-      title: 'RA管理画面',
-      icon: `<svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>`
-    },
-    {
       id: VIEWS.COMPANY_ACTIONS,
       title: '企業対応',
       icon: `<svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>`
-    },
-    {
-      id: VIEWS.CONSULTANTS,
-      title: 'コンサル別実績',
-      icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>`
     },
     {
       id: VIEWS.COMPANIES,
@@ -3815,6 +3795,7 @@ function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNa
   let activeRoleType = savedState.roleType !== undefined ? savedState.roleType : 'CA'; // 'CA' | 'RA'
   let searchKeyword = savedState.searchKeyword || '';
   let activeBallFilter = savedState.activeBallFilter || 'ALL'; // 'ALL' | 'CA' | 'RA' | 'OVERDUE' | 'COMPANY'
+  let showAllInProgress = savedState.showAllInProgress !== undefined ? savedState.showAllInProgress : false; // Step 20
 
   function updateView(options = {}) {
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
@@ -3836,18 +3817,18 @@ function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNa
     const qTargets = store.getQTargets(selectedFiscalYear, selectedQuarter);
     const qTargetMap = new Map(qTargets.map(t => [t.consultantId, Number(t.targetCount || 0)]));
 
-    // 有効な CA・兼任コンサルタントを抽出 (指示書 5項)
+    // 有効な CA・兼任コンサルタントを抽出
     const activeCaConsultants = consultants.filter(c => {
       if (c.isArchived || c.status === 'inactive') return false;
       if (c.roles && Array.isArray(c.roles)) return c.roles.includes('CA') || c.roles.includes('ADMIN');
       return c.roleType === 'CA' || c.roleType === 'ADMIN';
     });
 
-    // チームQ目標 ＝ 対象QのCA個人目標の合計 (指示書 5項)
+    // チームQ目標 ＝ 対象QのCA個人目標の合計
     let teamQTarget = activeCaConsultants.reduce((sum, c) => sum + (qTargetMap.get(c.consultantId) || 0), 0);
     if (teamQTarget === 0) teamQTarget = qTargetMap.get('TEAM') || 13;
 
-    // 担当者フィルターに基づく案件フィルタリング (指示書 6, 7項: ID最優先)
+    // 担当者フィルターに基づく案件フィルタリング
     const filteredSelections = selections.filter(s => {
       if (s.isArchived) return false;
       if (selectedConsultantId === 'ALL') return true;
@@ -3857,7 +3838,7 @@ function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNa
         : (s.raId === selectedConsultantId || s.raConsultantId === selectedConsultantId);
     });
 
-    // 「本日の対応」サマリー用件数算出 (Step 9項)
+    // 「本日の対応」サマリー用件数算出
     const caBallCount = filteredSelections.filter(s => s.currentBall === 'CA' && s.phase !== '選考終了' && s.phase !== '内定辞退').length;
     const raBallCount = filteredSelections.filter(s => s.currentBall === 'RA' && s.phase !== '選考終了' && s.phase !== '内定辞退').length;
     const overdueCount = filteredSelections.filter(s => {
@@ -3867,7 +3848,7 @@ function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNa
     }).length;
     const waitingCompanyCount = filteredSelections.filter(s => (s.currentBall === 'COMPANY' || s.companyActionStatus === '企業回答待ち') && s.phase !== '選考終了' && s.phase !== '内定辞退').length;
 
-    // 1. Q承諾実績 (対象Q期間内に内定承諾・入社決定となった件数)
+    // 1. Q承諾実績
     const acceptedSelections = filteredSelections.filter(s => {
       if (s.phase !== '内定承諾' && s.phase !== '入社予定') return false;
       const acceptDateStr = s.selectionEndDate || s.phaseUpdatedAt || s.updatedAt;
@@ -3877,13 +3858,12 @@ function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNa
     });
     const qAcceptedCount = acceptedSelections.length;
 
-    // 2. Q進行中ヨミ (対象Qに着地見込みの進行中案件)
-    const inProgressSelectionsInQ = filteredSelections.filter(s => {
-      if (['選考終了', '内定辞退', '内定承諾', '入社予定', '書類見送り', '面接見送り', '候補者辞退', '他社決定'].includes(s.phase)) {
-        return false;
-      }
-      return isSelectionInQuarter(s, selectedFiscalYear, selectedQuarter);
-    });
+    // 2. 進行中案件の決定（対象Q限定 or 全進行案件: Step 20項）
+    const allActiveSelections = filteredSelections.filter(s => !['選考終了', '内定辞退', '内定承諾', '入社予定', '書類見送り', '面接見送り', '候補者辞退', '他社決定'].includes(s.phase));
+    
+    const inProgressSelectionsInQ = showAllInProgress
+      ? allActiveSelections
+      : allActiveSelections.filter(s => isSelectionInQuarter(s, selectedFiscalYear, selectedQuarter));
 
     // ヨミの正規化合計計算
     const rawYomiSum = inProgressSelectionsInQ.reduce((sum, s) => sum + normalizeYomi(s.yomi), 0);
@@ -3969,12 +3949,10 @@ function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNa
               }).join('')}
             </select>
 
-            ${selectedConsultantId !== 'ALL' ? `
-              <div class="bg-slate-100 p-1 rounded-lg flex items-center border border-slate-200 font-bold ml-1">
-                <button id="btn-dashboard-role-ca" class="px-2.5 py-0.5 rounded transition ${activeRoleType === 'CA' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">CA</button>
-                <button id="btn-dashboard-role-ra" class="px-2.5 py-0.5 rounded transition ${activeRoleType === 'RA' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">RA</button>
-              </div>
-            ` : ''}
+            <div class="bg-slate-100 p-1 rounded-lg flex items-center border border-slate-200 font-bold ml-1">
+              <button id="btn-in-q-only" class="px-2.5 py-1 rounded text-xs transition ${!showAllInProgress ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">対象Q案件</button>
+              <button id="btn-all-in-prog" class="px-2.5 py-1 rounded text-xs transition ${showAllInProgress ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">全進行案件</button>
+            </div>
           </div>
         </div>
 
@@ -4149,15 +4127,15 @@ function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNa
       updateView();
     });
 
-    container.querySelector('#btn-dashboard-role-ca')?.addEventListener('click', () => {
-      activeRoleType = 'CA';
-      saveDashboardState({ roleType: 'CA' });
+    container.querySelector('#btn-in-q-only')?.addEventListener('click', () => {
+      showAllInProgress = false;
+      saveDashboardState({ showAllInProgress: false });
       updateView();
     });
 
-    container.querySelector('#btn-dashboard-role-ra')?.addEventListener('click', () => {
-      activeRoleType = 'RA';
-      saveDashboardState({ roleType: 'RA' });
+    container.querySelector('#btn-all-in-prog')?.addEventListener('click', () => {
+      showAllInProgress = true;
+      saveDashboardState({ showAllInProgress: true });
       updateView();
     });
 
@@ -11009,8 +10987,11 @@ class App {
         });
         break;
 
+      // 旧ビューからのリダイレクト対応 (Step 28項)
+      case VIEWS.SELECTIONS:
       case VIEWS.CA:
-        renderCaView(contentContainer, {
+      case VIEWS.CONSULTANTS:
+        renderDashboard(contentContainer, {
           onOpenDetail: (selectionId) => {
             openSelectionDetailModal(selectionId, () => this.render());
           }
@@ -11018,31 +10999,12 @@ class App {
         break;
 
       case VIEWS.RA:
-        renderRaView(contentContainer, {
-          onOpenDetail: (selectionId) => {
-            openSelectionDetailModal(selectionId, () => this.render());
-          },
-          onOpenEmailComposer: (companyId, selectionIds = null) => {
-            openEmailComposerModal(companyId, () => this.render(), selectionIds);
-          }
-        });
-        break;
-
-      case VIEWS.COMPANY_ACTIONS:
         renderCompanyActionListView(contentContainer, {
           onOpenDetail: (selectionId) => {
             openSelectionDetailModal(selectionId, () => this.render());
           },
           onOpenEmailComposer: (companyId, selectionIds = null) => {
             openEmailComposerModal(companyId, () => this.render(), selectionIds);
-          }
-        });
-        break;
-
-      case VIEWS.CONSULTANTS:
-        renderConsultantView(contentContainer, this.viewFilters.consultantId || '', {
-          onOpenDetail: (selectionId) => {
-            openSelectionDetailModal(selectionId, () => this.render());
           }
         });
         break;

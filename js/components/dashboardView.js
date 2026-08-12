@@ -40,6 +40,7 @@ export function renderDashboard(container, { onOpenDetail, onNavigateToSelection
   let activeRoleType = savedState.roleType !== undefined ? savedState.roleType : 'CA'; // 'CA' | 'RA'
   let searchKeyword = savedState.searchKeyword || '';
   let activeBallFilter = savedState.activeBallFilter || 'ALL'; // 'ALL' | 'CA' | 'RA' | 'OVERDUE' | 'COMPANY'
+  let showAllInProgress = savedState.showAllInProgress !== undefined ? savedState.showAllInProgress : false; // Step 20
 
   function updateView(options = {}) {
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
@@ -61,18 +62,18 @@ export function renderDashboard(container, { onOpenDetail, onNavigateToSelection
     const qTargets = store.getQTargets(selectedFiscalYear, selectedQuarter);
     const qTargetMap = new Map(qTargets.map(t => [t.consultantId, Number(t.targetCount || 0)]));
 
-    // 有効な CA・兼任コンサルタントを抽出 (指示書 5項)
+    // 有効な CA・兼任コンサルタントを抽出
     const activeCaConsultants = consultants.filter(c => {
       if (c.isArchived || c.status === 'inactive') return false;
       if (c.roles && Array.isArray(c.roles)) return c.roles.includes('CA') || c.roles.includes('ADMIN');
       return c.roleType === 'CA' || c.roleType === 'ADMIN';
     });
 
-    // チームQ目標 ＝ 対象QのCA個人目標の合計 (指示書 5項)
+    // チームQ目標 ＝ 対象QのCA個人目標の合計
     let teamQTarget = activeCaConsultants.reduce((sum, c) => sum + (qTargetMap.get(c.consultantId) || 0), 0);
     if (teamQTarget === 0) teamQTarget = qTargetMap.get('TEAM') || 13;
 
-    // 担当者フィルターに基づく案件フィルタリング (指示書 6, 7項: ID最優先)
+    // 担当者フィルターに基づく案件フィルタリング
     const filteredSelections = selections.filter(s => {
       if (s.isArchived) return false;
       if (selectedConsultantId === 'ALL') return true;
@@ -82,7 +83,7 @@ export function renderDashboard(container, { onOpenDetail, onNavigateToSelection
         : (s.raId === selectedConsultantId || s.raConsultantId === selectedConsultantId);
     });
 
-    // 「本日の対応」サマリー用件数算出 (Step 9項)
+    // 「本日の対応」サマリー用件数算出
     const caBallCount = filteredSelections.filter(s => s.currentBall === 'CA' && s.phase !== '選考終了' && s.phase !== '内定辞退').length;
     const raBallCount = filteredSelections.filter(s => s.currentBall === 'RA' && s.phase !== '選考終了' && s.phase !== '内定辞退').length;
     const overdueCount = filteredSelections.filter(s => {
@@ -92,7 +93,7 @@ export function renderDashboard(container, { onOpenDetail, onNavigateToSelection
     }).length;
     const waitingCompanyCount = filteredSelections.filter(s => (s.currentBall === 'COMPANY' || s.companyActionStatus === '企業回答待ち') && s.phase !== '選考終了' && s.phase !== '内定辞退').length;
 
-    // 1. Q承諾実績 (対象Q期間内に内定承諾・入社決定となった件数)
+    // 1. Q承諾実績
     const acceptedSelections = filteredSelections.filter(s => {
       if (s.phase !== '内定承諾' && s.phase !== '入社予定') return false;
       const acceptDateStr = s.selectionEndDate || s.phaseUpdatedAt || s.updatedAt;
@@ -102,13 +103,12 @@ export function renderDashboard(container, { onOpenDetail, onNavigateToSelection
     });
     const qAcceptedCount = acceptedSelections.length;
 
-    // 2. Q進行中ヨミ (対象Qに着地見込みの進行中案件)
-    const inProgressSelectionsInQ = filteredSelections.filter(s => {
-      if (['選考終了', '内定辞退', '内定承諾', '入社予定', '書類見送り', '面接見送り', '候補者辞退', '他社決定'].includes(s.phase)) {
-        return false;
-      }
-      return isSelectionInQuarter(s, selectedFiscalYear, selectedQuarter);
-    });
+    // 2. 進行中案件の決定（対象Q限定 or 全進行案件: Step 20項）
+    const allActiveSelections = filteredSelections.filter(s => !['選考終了', '内定辞退', '内定承諾', '入社予定', '書類見送り', '面接見送り', '候補者辞退', '他社決定'].includes(s.phase));
+    
+    const inProgressSelectionsInQ = showAllInProgress
+      ? allActiveSelections
+      : allActiveSelections.filter(s => isSelectionInQuarter(s, selectedFiscalYear, selectedQuarter));
 
     // ヨミの正規化合計計算
     const rawYomiSum = inProgressSelectionsInQ.reduce((sum, s) => sum + normalizeYomi(s.yomi), 0);
@@ -194,12 +194,10 @@ export function renderDashboard(container, { onOpenDetail, onNavigateToSelection
               }).join('')}
             </select>
 
-            ${selectedConsultantId !== 'ALL' ? `
-              <div class="bg-slate-100 p-1 rounded-lg flex items-center border border-slate-200 font-bold ml-1">
-                <button id="btn-dashboard-role-ca" class="px-2.5 py-0.5 rounded transition ${activeRoleType === 'CA' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">CA</button>
-                <button id="btn-dashboard-role-ra" class="px-2.5 py-0.5 rounded transition ${activeRoleType === 'RA' ? 'bg-purple-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">RA</button>
-              </div>
-            ` : ''}
+            <div class="bg-slate-100 p-1 rounded-lg flex items-center border border-slate-200 font-bold ml-1">
+              <button id="btn-in-q-only" class="px-2.5 py-1 rounded text-xs transition ${!showAllInProgress ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">対象Q案件</button>
+              <button id="btn-all-in-prog" class="px-2.5 py-1 rounded text-xs transition ${showAllInProgress ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">全進行案件</button>
+            </div>
           </div>
         </div>
 
@@ -374,15 +372,15 @@ export function renderDashboard(container, { onOpenDetail, onNavigateToSelection
       updateView();
     });
 
-    container.querySelector('#btn-dashboard-role-ca')?.addEventListener('click', () => {
-      activeRoleType = 'CA';
-      saveDashboardState({ roleType: 'CA' });
+    container.querySelector('#btn-in-q-only')?.addEventListener('click', () => {
+      showAllInProgress = false;
+      saveDashboardState({ showAllInProgress: false });
       updateView();
     });
 
-    container.querySelector('#btn-dashboard-role-ra')?.addEventListener('click', () => {
-      activeRoleType = 'RA';
-      saveDashboardState({ roleType: 'RA' });
+    container.querySelector('#btn-all-in-prog')?.addEventListener('click', () => {
+      showAllInProgress = true;
+      saveDashboardState({ showAllInProgress: true });
       updateView();
     });
 
