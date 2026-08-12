@@ -47,6 +47,19 @@ export function initFirebase() {
         firebase.initializeApp(config);
       }
       db = firebase.firestore();
+
+      // 指示書 7項: Auth初期化・匿名サインインによる permission-denied 解消
+      if (firebase.auth) {
+        const auth = firebase.auth();
+        if (!auth.currentUser) {
+          auth.signInAnonymously().then(() => {
+            console.log("Firebase Auth initialized successfully.");
+          }).catch((err) => {
+            console.warn("Firebase Auth sign-in warning:", err.message || err);
+          });
+        }
+      }
+
       isFirebaseInitialized = true;
     } else {
       console.warn("Firebase SDK is not loaded.");
