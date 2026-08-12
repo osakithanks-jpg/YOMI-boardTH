@@ -10871,6 +10871,19 @@ class App {
         });
         break;
 
+      case VIEWS.KANBAN:
+        renderWhiteboardV2(contentContainer, {
+          onOpenDetail: (selectionId) => {
+            openSelectionDetailModal(selectionId, () => this.render());
+          },
+          onNavigateToCompanyActions: (filterUrgencyCode) => {
+            this.currentView = VIEWS.COMPANY_ACTIONS;
+            this.viewFilters = { filterUrgencyCode };
+            this.render();
+          }
+        });
+        break;
+
       case VIEWS.RA:
         renderCompanyActionListView(contentContainer, {
           onOpenDetail: (selectionId) => {

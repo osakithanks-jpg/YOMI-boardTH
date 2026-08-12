@@ -8,7 +8,7 @@ import { renderSidebar, VIEWS } from './components/sidebar.js';
 import { renderDashboard } from './components/dashboardView.js';
 import { renderSelectionList } from './components/selectionListView.js';
 import { openSelectionDetailModal } from './components/selectionDetailModal.js';
-import { renderKanbanView } from './components/kanbanView.js';
+import { renderWhiteboardV2 } from './components/whiteboardV2.js';
 import { renderCaView } from './components/caView.js';
 import { renderRaView } from './components/raView.js';
 import { renderCompanyActionListView } from './components/companyActionListView.js';
@@ -103,6 +103,19 @@ class App {
           },
           onOpenEmailComposer: (companyId, selectionIds = null) => {
             openEmailComposerModal(companyId, selectionIds);
+          }
+        });
+        break;
+
+      case VIEWS.KANBAN:
+        renderWhiteboardV2(contentContainer, {
+          onOpenDetail: (selectionId) => {
+            openSelectionDetailModal(selectionId, () => this.render());
+          },
+          onNavigateToCompanyActions: (filterUrgencyCode) => {
+            this.currentView = VIEWS.COMPANY_ACTIONS;
+            this.viewFilters = { filterUrgencyCode };
+            this.render();
           }
         });
         break;
