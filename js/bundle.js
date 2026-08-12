@@ -3814,7 +3814,9 @@ function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNa
   let selectedConsultantId = savedState.consultantId !== undefined ? savedState.consultantId : 'ALL';
   let activeRoleType = savedState.roleType !== undefined ? savedState.roleType : 'CA'; // 'CA' | 'RA'
 
-  function updateView() {
+  function updateView(options = {}) {
+    const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
+
     const selections = store.getSelections();
     const consultants = store.getConsultants();
     const companies = store.getCompanies();
@@ -4119,10 +4121,14 @@ function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNa
           onNavigateToSelections(selId);
         }
       });
-    });
+    if (options.preserveScroll !== false && savedScrollY > 0) {
+      setTimeout(() => {
+        window.scrollTo({ top: savedScrollY, behavior: 'instant' });
+      }, 0);
+    }
   }
 
-  updateView();
+  updateView({ preserveScroll: false });
 }
 
 
