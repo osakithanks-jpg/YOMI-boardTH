@@ -136,76 +136,85 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
     const gridTarget = container.querySelector('#kanban-board-grid-container');
     if (!gridTarget) return;
 
+    let gridRowsHTML = '';
+    if (columns.length === 0) {
+      gridRowsHTML = `
+        <div class="p-8 text-center bg-slate-50 border border-dashed border-slate-300 rounded-xl text-slate-500 font-bold text-sm">
+          ${selectedAxisMode === 'ca' ? '該当するCAがありません' : '該当する企業がありません'}
+        </div>
+      `;
+    } else {
+      gridRowsHTML = sorted5Phases.map((pObj) => {
+        const groupSels = enrichedSelections.filter(s => {
+          if (s.phase === '内定辞退') {
+            const prevPhase = s.previousPhaseBeforeDecline || '内定';
+            return getWhiteboardPhaseGroup(prevPhase) === pObj.label;
+          }
+          return s.wbGroup === pObj.label;
+        });
+
+        const groupCases = groupSels.length;
+        const groupPeople = calculateUniqueCandidatesCount(groupSels, false);
+        const groupYomi = groupSels.reduce((sum, s) => sum + (s.phase === '内定辞退' ? 0 : Number(s.yomi || 0)), 0);
+
+        const colsHTML = columns.map(col => {
+          const colGroupSels = groupSels.filter(s => col.filterFn(s));
+          const colYomi = colGroupSels.reduce((sum, s) => sum + (s.phase === '内定辞退' ? 0 : Number(s.yomi || 0)), 0);
+          const colPeople = calculateUniqueCandidatesCount(colGroupSels, false);
+
+          const cardsHTML = colGroupSels.length === 0
+            ? `<div class="h-full border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-[10px] text-slate-400 py-6">案件なし</div>`
+            : colGroupSels.map(s => renderCaCardHTML(s, lastUpdatedSelectionId === s.selectionId, selectedAxisMode === 'company')).join('');
+
+          return `
+            <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex flex-col justify-between" data-column-id="${col.id}">
+              <div class="flex items-center justify-between border-b border-slate-200 pb-1.5 mb-2">
+                <span class="font-extrabold text-xs text-slate-800 line-clamp-1">${col.title}</span>
+                <span class="text-[10px] text-slate-500 font-medium shrink-0 ml-1">
+                  案件:${colGroupSels.length} / 実人数:${colPeople} / ヨミ:${Math.round(colYomi * 100) / 100}
+                </span>
+              </div>
+
+              <div
+                class="kanban-drop-zone space-y-2 flex-1 min-h-[90px] p-1 rounded transition"
+                data-drop-group="${pObj.label}"
+                data-column-id="${col.id}"
+              >
+                ${cardsHTML}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div class="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-slate-50/50">
+            <div class="px-4 py-2 bg-slate-900 text-white flex items-center justify-between">
+              <div class="flex items-center space-x-3">
+                <span class="font-black text-sm text-indigo-200">${pObj.label}</span>
+                <span class="text-[11px] text-slate-400">（優先度: ${pObj.order}）</span>
+              </div>
+
+              <div class="flex items-center space-x-4 text-xs font-semibold">
+                <span>選考案件: <strong class="text-white">${groupCases}</strong>件</span>
+                <span class="text-slate-400">|</span>
+                <span>候補者実人数: <strong class="text-indigo-300">${groupPeople}</strong>名</span>
+                <span class="text-slate-400">|</span>
+                <span>ヨミ合計: <strong class="text-emerald-400">${Math.round(groupYomi * 100) / 100}</strong></span>
+              </div>
+            </div>
+
+            <div class="p-2 bg-slate-100/50 min-h-[130px]" style="display: grid; grid-template-columns: repeat(${Math.max(columns.length, 1)}, minmax(240px, 1fr)); gap: 0.75rem;">
+              ${colsHTML}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
     gridTarget.innerHTML = `
       <div id="kanban-horizontal-scroll-container" class="overflow-x-auto w-full">
         <div class="space-y-4" style="min-width: max-content; width: 100%;">
-          ${columns.length === 0 ? `
-            <div class="p-8 text-center bg-slate-50 border border-dashed border-slate-300 rounded-xl text-slate-500 font-bold text-sm">
-              ${selectedAxisMode === 'ca' ? '該当するCAがありません' : '該当する企業がありません'}
-            </div>
-          ` : sorted5Phases.map((pObj) => {
-            const groupSels = enrichedSelections.filter(s => {
-              if (s.phase === '内定辞退') {
-                const prevPhase = s.previousPhaseBeforeDecline || '内定';
-                return getWhiteboardPhaseGroup(prevPhase) === pObj.label;
-              }
-              return s.wbGroup === pObj.label;
-            });
-
-            const groupCases = groupSels.length;
-            const groupPeople = calculateUniqueCandidatesCount(groupSels, false);
-            const groupYomi = groupSels.reduce((sum, s) => sum + (s.phase === '内定辞退' ? 0 : Number(s.yomi || 0)), 0);
-
-            return `
-              <div class="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-slate-50/50">
-                <div class="px-4 py-2 bg-slate-900 text-white flex items-center justify-between">
-                  <div class="flex items-center space-x-3">
-                    <span class="font-black text-sm text-indigo-200">${pObj.label}</span>
-                    <span class="text-[11px] text-slate-400">（優先度: ${pObj.order}）</span>
-                  </div>
-
-                  <div class="flex items-center space-x-4 text-xs font-semibold">
-                    <span>選考案件: <strong class="text-white">${groupCases}</strong>件</span>
-                    <span class="text-slate-400">|</span>
-                    <span>候補者実人数: <strong class="text-indigo-300">${groupPeople}</strong>名</span>
-                    <span class="text-slate-400">|</span>
-                    <span>ヨミ合計: <strong class="text-emerald-400">${Math.round(groupYomi * 100) / 100}</strong></span>
-                  </div>
-                </div>
-
-                <div class="p-2 bg-slate-100/50 min-h-[130px]" style="display: grid; grid-template-columns: repeat(${Math.max(columns.length, 1)}, minmax(240px, 1fr)); gap: 0.75rem;">
-                  ${columns.map(col => {
-                    const colGroupSels = groupSels.filter(s => col.filterFn(s));
-                    const colYomi = colGroupSels.reduce((sum, s) => sum + (s.phase === '内定辞退' ? 0 : Number(s.yomi || 0)), 0);
-                    const colPeople = calculateUniqueCandidatesCount(colGroupSels, false);
-
-                    return `
-                      <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex flex-col justify-between" data-column-id="${col.id}">
-                        <div class="flex items-center justify-between border-b border-slate-200 pb-1.5 mb-2">
-                          <span class="font-extrabold text-xs text-slate-800 line-clamp-1">${col.title}</span>
-                          <span class="text-[10px] text-slate-500 font-medium shrink-0 ml-1">
-                            案件:${colGroupSels.length} / 実人数:${colPeople} / ヨミ:${Math.round(colYomi * 100) / 100}
-                          </span>
-                        </div>
-
-                        <div
-                          class="kanban-drop-zone space-y-2 flex-1 min-h-[90px] p-1 rounded transition"
-                          data-drop-group="${pObj.label}"
-                          data-column-id="${col.id}"
-                        >
-                          ${colGroupSels.length === 0 ? `
-                            <div class="h-full border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-[10px] text-slate-400 py-6">
-                              案件なし
-                            </div>
-                          ` : colGroupSels.map(s => renderCaCardHTML(s, lastUpdatedSelectionId === s.selectionId, selectedAxisMode === 'company')).join('')}
-                        </div>
-                      </div>
-                    `;
-                  }).join('')}
-                </div>
-              </div>
-            `;
-          }).join('')}
+          ${gridRowsHTML}
         </div>
       </div>
     `;
