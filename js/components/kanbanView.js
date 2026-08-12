@@ -38,6 +38,7 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
   let searchKeyword = savedState.searchKeyword || '';
   let filterCaId = savedState.filterCaId || '';
   let filterCompanySearch = savedState.filterCompanySearch || '';
+  let lastUpdatedSelectionId = savedState.lastUpdatedSelectionId || null;
 
   function updateView(options = {}) {
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
