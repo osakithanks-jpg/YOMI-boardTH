@@ -168,23 +168,23 @@ export function renderCompanyActionListView(container, { onOpenDetail, onOpenEma
 
     container.innerHTML = `
       <div class="space-y-5">
-        <!-- 画面ヘッダー (指示書 3, 4項) -->
-        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <!-- 画面ヘッダー -->
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+              <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
               企業対応
             </h2>
-            <p class="text-xs text-slate-500 mt-0.5">企業ごとの緊急度と本日のRA対応・優先アクションを確認できます</p>
+            <p class="text-xs text-slate-500 mt-1">※企業に対する今なすべき次行動・アプローチ管理画面です。</p>
           </div>
 
           <div class="flex items-center space-x-3 text-xs">
             <label class="inline-flex items-center space-x-1.5 font-bold text-slate-700 cursor-pointer">
-              <input type="checkbox" id="chk-action-only-mine" ${filterOnlyMine ? 'checked' : ''} class="rounded text-indigo-600">
-              <span>自分の担当企業のみ表示</span>
+              <input type="checkbox" id="chk-ra-only-mine" ${filterOnlyMine ? 'checked' : ''} class="rounded text-amber-600">
+              <span>自分の担当企業のみ</span>
             </label>
 
-            <select id="select-action-ra-filter" class="bg-slate-50 border border-slate-300 font-bold rounded px-3 py-1.5 text-slate-800 focus:outline-none">
+            <select id="select-ra-filter" class="bg-slate-50 border border-slate-300 font-bold rounded px-3 py-2 text-slate-800 focus:outline-none">
               <option value="">すべてのRA担当</option>
               ${raConsultants.map(c => `<option value="${c.consultantId}" ${filterRaId === c.consultantId ? 'selected' : ''}>${c.name} (RA)</option>`).join('')}
             </select>
@@ -359,15 +359,24 @@ export function renderCompanyActionListView(container, { onOpenDetail, onOpenEma
                               </div>
                             </div>
 
-                            <!-- 右ブロック: 操作 (指示書 17, 26項) -->
-                            <div class="flex items-center space-x-1.5 shrink-0 justify-end">
-                              <button class="btn-action-single-email px-2.5 py-1 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded font-bold text-xs transition border border-indigo-200" data-company-id="${comp.companyId}" data-selection-id="${s.selectionId}">
-                                メール
+                            <!-- 右ブロック: ワンクリック操作 (指示書 17項) -->
+                            <div class="flex flex-wrap items-center space-x-1 justify-end shrink-0">
+                              <button class="btn-action-single-email px-2 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded font-bold text-[10px] transition" data-company-id="${comp.companyId}" data-selection-id="${s.selectionId}">
+                                メール作成
                               </button>
-                              <button class="btn-action-single-contacted px-2 py-1 bg-slate-100 hover:bg-slate-800 hover:text-white text-slate-700 rounded font-bold text-xs transition border border-slate-200" data-company-id="${comp.companyId}" data-selection-id="${s.selectionId}">
-                                完了
+                              <button data-ra-action="CONTACTED" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded font-bold text-[10px] transition">
+                                連絡済
                               </button>
-                              <button class="btn-action-cand-detail px-2 py-1 bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 rounded font-bold text-xs transition border border-slate-200" data-id="${s.selectionId}">
+                              <button data-ra-action="PASS" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-[10px] transition">
+                                通過
+                              </button>
+                              <button data-ra-action="REJECT" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold text-[10px] transition">
+                                見送り
+                              </button>
+                              <button data-ra-action="DATES_AVAILABLE" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded font-bold text-[10px] transition">
+                                日程候補あり
+                              </button>
+                              <button class="btn-action-cand-detail px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold text-[10px] transition" data-id="${s.selectionId}">
                                 詳細
                               </button>
                             </div>
@@ -489,6 +498,16 @@ export function renderCompanyActionListView(container, { onOpenDetail, onOpenEma
       btn.addEventListener('click', () => {
         const selId = btn.getAttribute('data-selection-id');
         store.updateSelection(selId, { companyActionStatus: '完了' }, '個別の企業対応完了');
+        updateView({ preserveScroll: true });
+      });
+    });
+
+    container.querySelectorAll('button[data-ra-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const selId = btn.getAttribute('data-sel-id');
+        const act = btn.getAttribute('data-ra-action');
+        saveActionState({ scrollTop: window.scrollY || document.documentElement.scrollTop });
+        store.handleRaAction(selId, act);
         updateView({ preserveScroll: true });
       });
     });

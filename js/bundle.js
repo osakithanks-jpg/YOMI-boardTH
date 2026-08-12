@@ -1595,6 +1595,167 @@ class Store {
     this.setItem(STORAGE_KEYS.CONSULTANTS, list);
   }
 
+  // --- ワンクリック操作 ＆ 自動バトン連携 (指示書 18, 19, 20, 21, 22項) ---
+  handleRaAction(selectionId, actionType, customParams = {}) {
+    const selections = this.getItem(STORAGE_KEYS.SELECTIONS);
+    const idx = selections.findIndex(s => s.selectionId === selectionId);
+    if (idx < 0) return;
+
+    const sel = selections[idx];
+    const user = this.getCurrentConsultant();
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const next2BizDays = new Date();
+    next2BizDays.setDate(next2BizDays.getDate() + 2);
+    const next2BizStr = next2BizDays.toISOString().split('T')[0];
+
+    let currentBall = sel.currentBall || 'RA';
+    let companyActionStatus = sel.companyActionStatus || '要企業対応';
+    let nextAction = sel.nextAction || '';
+
+    let logTitle = '';
+    let logDetail = '';
+
+    if (actionType === 'CONTACTED') {
+      currentBall = 'COMPANY';
+      companyActionStatus = '企業回答待ち';
+      nextAction = '企業からの回答待ち';
+      sel.lastContactDate = todayStr;
+      sel.nextFollowDate = next2BizStr;
+      logTitle = 'RA：企業へ連絡済み';
+      logDetail = '現在のボール: RA → 企業（状態: 企業回答待ち）';
+    } else if (actionType === 'PASS') {
+      currentBall = 'CA';
+      companyActionStatus = 'CA確認待ち';
+      nextAction = '候補者へ通過連絡';
+      sel.lastCompanyResponseDate = todayStr;
+      logTitle = 'RA：通過登録';
+      logDetail = '現在のボール: 企業 → CA（次の行動: 候補者へ通過連絡）';
+    } else if (actionType === 'REJECT') {
+      currentBall = 'CA';
+      companyActionStatus = 'CA確認待ち';
+      nextAction = '候補者へ見送り連絡';
+      sel.lastCompanyResponseDate = todayStr;
+      logTitle = 'RA：見送り登録';
+      logDetail = '現在のボール: 企業 → CA（次の行動: 候補者へ見送り連絡）';
+    } else if (actionType === 'DATES_AVAILABLE') {
+      currentBall = 'CA';
+      companyActionStatus = 'CA確認待ち';
+      nextAction = '候補者へ候補日確認';
+      sel.lastCompanyResponseDate = todayStr;
+      logTitle = 'RA：日程候補あり';
+      logDetail = '現在のボール: 企業 → CA（次の行動: 候補者へ候補日確認）';
+    } else if (actionType === 'OFFER_AVAILABLE') {
+      currentBall = 'CA';
+      companyActionStatus = 'CA確認待ち';
+      nextAction = '候補者へ条件提示・意向確認';
+      sel.lastCompanyResponseDate = todayStr;
+      logTitle = 'RA：条件提示あり';
+      logDetail = '現在のボール: 企業 → CA（次の行動: 候補者へ条件提示・意向確認）';
+    } else if (actionType === 'HOLD') {
+      currentBall = 'RA';
+      companyActionStatus = '企業対応中';
+      nextAction = '企業へ再確認';
+      logTitle = 'RA：回答保留';
+      logDetail = '現在のボール: RA（次の行動: 企業へ再確認）';
+    }
+
+    selections[idx] = {
+      ...sel,
+      ...customParams,
+      currentBall,
+      companyActionStatus,
+      nextAction,
+      updatedAt: new Date().toISOString(),
+      updatedBy: user.name
+    };
+
+    this.addHistoryRecord(selectionId, logTitle, logDetail, 'RA');
+    this.setItem(STORAGE_KEYS.SELECTIONS, selections);
+  }
+
+  handleCaAction(selectionId, actionType, customParams = {}) {
+    const selections = this.getItem(STORAGE_KEYS.SELECTIONS);
+    const idx = selections.findIndex(s => s.selectionId === selectionId);
+    if (idx < 0) return;
+
+    const sel = selections[idx];
+    const user = this.getCurrentConsultant();
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    let currentBall = sel.currentBall || 'CA';
+    let companyActionStatus = sel.companyActionStatus || 'CA対応中';
+    let nextAction = sel.nextAction || '';
+
+    let logTitle = '';
+    let logDetail = '';
+
+    if (actionType === 'CONTACTED') {
+      currentBall = 'CA';
+      sel.lastCaContactDate = todayStr;
+      logTitle = 'CA：候補者へ連絡済み';
+      logDetail = '候補者への連絡日を更新しました。';
+    } else if (actionType === 'GOT_DATES') {
+      currentBall = 'RA';
+      companyActionStatus = '要企業対応';
+      nextAction = '企業へ候補日を提出';
+      logTitle = 'CA：候補日を取得';
+      logDetail = '現在のボール: CA → RA（次の行動: 企業へ候補日を提出）';
+    } else if (actionType === 'WAITING_CANDIDATE') {
+      currentBall = 'CA';
+      nextAction = '候補者からの回答待ち';
+      logTitle = 'CA：候補者回答待ち';
+      logDetail = '現在のボール: CA（次の行動: 候補者からの回答待ち）';
+    } else if (actionType === 'ACCEPT_INTENT') {
+      currentBall = 'RA';
+      companyActionStatus = '要企業対応';
+      nextAction = '企業へ内定承諾を連絡';
+      logTitle = 'CA：承諾意向確認';
+      logDetail = '現在のボール: CA → RA（次の行動: 企業へ内定承諾を連絡）';
+    } else if (actionType === 'CONSIDER') {
+      currentBall = 'CA';
+      nextAction = '意向醸成フォロー';
+      logTitle = 'CA：検討中';
+      logDetail = '意向醸成フォローを継続します。';
+    } else if (actionType === 'DECLINE_INTENT') {
+      currentBall = 'RA';
+      companyActionStatus = '要企業対応';
+      nextAction = '企業へ辞退連絡';
+      logTitle = 'CA：辞退意向';
+      logDetail = '現在のボール: CA → RA（次の行動: 企業へ辞退連絡）';
+    }
+
+    selections[idx] = {
+      ...sel,
+      ...customParams,
+      currentBall,
+      companyActionStatus,
+      nextAction,
+      updatedAt: new Date().toISOString(),
+      updatedBy: user.name
+    };
+
+    this.addHistoryRecord(selectionId, logTitle, logDetail, 'CA');
+    this.setItem(STORAGE_KEYS.SELECTIONS, selections);
+  }
+
+  addHistoryRecord(selectionId, title, detail, role = 'SYSTEM') {
+    const histories = this.getItem(STORAGE_KEYS.HISTORIES);
+    const user = this.getCurrentConsultant();
+
+    histories.push({
+      historyId: 'hist_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+      selectionId,
+      actionTitle: title,
+      detail,
+      role,
+      changedBy: user.name,
+      changedAt: new Date().toISOString()
+    });
+
+    this.setItem(STORAGE_KEYS.HISTORIES, histories);
+  }
+
   saveCompanySubmission(submissionData) {
     const list = this.getItem(STORAGE_KEYS.COMPANY_SUBMISSIONS);
     const user = this.getCurrentConsultant();
@@ -3573,7 +3734,7 @@ function renderSidebar(container, activeView, onSelectView) {
     },
     {
       id: VIEWS.COMPANIES,
-      title: '企業別・提出エクスポート',
+      title: '企業別提出',
       icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>`
     },
     {
@@ -5700,6 +5861,30 @@ function renderCaView(container, { onOpenDetail }) {
           </div>
         </div>
 
+        <!-- 本日のCA対応 サマリー (指示書 11項) -->
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div class="bg-rose-50/70 p-3 rounded-lg border border-rose-200 cursor-pointer hover:bg-rose-100 transition" id="ca-sum-overdue">
+            <div class="text-[11px] font-extrabold text-rose-800">期限超過</div>
+            <div class="text-xl font-black text-rose-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => getSelectionAlerts(s).isOverdue)).length}<span class="text-xs font-normal text-rose-700 ml-1">件</span></div>
+          </div>
+          <div class="bg-amber-50/70 p-3 rounded-lg border border-amber-200 cursor-pointer hover:bg-amber-100 transition" id="ca-sum-contact">
+            <div class="text-[11px] font-extrabold text-amber-800">候補者連絡</div>
+            <div class="text-xl font-black text-amber-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => s.currentBall === 'CA')).length}<span class="text-xs font-normal text-amber-700 ml-1">件</span></div>
+          </div>
+          <div class="bg-indigo-50/70 p-3 rounded-lg border border-indigo-200 cursor-pointer hover:bg-indigo-100 transition" id="ca-sum-dates">
+            <div class="text-[11px] font-extrabold text-indigo-800">候補日確認</div>
+            <div class="text-xl font-black text-indigo-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => (s.nextAction || '').includes('候補日'))).length}<span class="text-xs font-normal text-indigo-700 ml-1">件</span></div>
+          </div>
+          <div class="bg-purple-50/70 p-3 rounded-lg border border-purple-200 cursor-pointer hover:bg-purple-100 transition" id="ca-sum-intent">
+            <div class="text-[11px] font-extrabold text-purple-800">意向確認</div>
+            <div class="text-xl font-black text-purple-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => (s.nextAction || '').includes('意向'))).length}<span class="text-xs font-normal text-purple-700 ml-1">件</span></div>
+          </div>
+          <div class="bg-emerald-50/70 p-3 rounded-lg border border-emerald-200 cursor-pointer hover:bg-emerald-100 transition" id="ca-sum-ra-reply">
+            <div class="text-[11px] font-extrabold text-emerald-800">RAから回答あり</div>
+            <div class="text-xl font-black text-emerald-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => s.companyActionStatus === 'CA確認待ち')).length}<span class="text-xs font-normal text-emerald-700 ml-1">件</span></div>
+          </div>
+        </div>
+
         <!-- 検索 & フィルター (指示書 9項) -->
         <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center gap-3 text-xs">
           <input type="text" id="input-ca-search-kw" value="${searchCandName}" placeholder="候補者名 / フリガナで検索..." class="bg-slate-50 border border-slate-300 rounded px-3 py-1.5 focus:outline-none focus:bg-white focus:border-indigo-600 min-w-[200px]">
@@ -5777,7 +5962,10 @@ function renderCaView(container, { onOpenDetail }) {
 
                         return `
                           <tr class="${isEnded ? 'bg-slate-100/70 text-slate-400' : 'hover:bg-indigo-50/30'} transition">
-                            <td class="px-4 py-2.5 font-bold text-slate-900">${comp ? comp.name : s.companyName}</td>
+                            <td class="px-4 py-2.5 font-bold text-slate-900">
+                              <div>${comp ? comp.name : s.companyName}</div>
+                              <div class="text-[10px] text-indigo-700 font-semibold mt-0.5">次行動: ${s.nextAction || '候補者連絡'}</div>
+                            </td>
                             <td class="px-4 py-2.5 text-slate-700">${job ? (job.title || job.jobName) : s.jobName}</td>
                             <td class="px-3 py-2.5 text-slate-600">${ra ? ra.name.split(' ')[0] : s.raName || '-'}</td>
                             <td class="px-3 py-2.5 font-bold">
@@ -5792,7 +5980,13 @@ function renderCaView(container, { onOpenDetail }) {
                               </div>
                             </td>
                             <td class="px-3 py-2.5 text-center">
-                              <button class="btn-ca-detail px-2.5 py-1 bg-slate-100 hover:bg-indigo-600 hover:text-white rounded text-xs transition" data-id="${s.selectionId}">詳細</button>
+                              <div class="flex items-center justify-end space-x-1">
+                                <button data-ca-action="CONTACTED" data-id="${s.selectionId}" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-[10px] font-bold">連絡済</button>
+                                <button data-ca-action="GOT_DATES" data-id="${s.selectionId}" class="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold">候補日取得</button>
+                                <button data-ca-action="ACCEPT_INTENT" data-id="${s.selectionId}" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold">承諾意向</button>
+                                <button data-ca-action="DECLINE_INTENT" data-id="${s.selectionId}" class="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-bold">辞退意向</button>
+                                <button class="btn-ca-detail px-2 py-0.5 bg-slate-100 hover:bg-indigo-600 hover:text-white rounded text-[10px] font-bold transition" data-id="${s.selectionId}">詳細</button>
+                              </div>
                             </td>
                           </tr>
                         `;
@@ -5814,6 +6008,15 @@ function renderCaView(container, { onOpenDetail }) {
     container.querySelector('#chk-ca-has-offer')?.addEventListener('change', (e) => { filterHasOffer = e.target.checked; updateView(); });
     container.querySelector('#chk-ca-multi-apply')?.addEventListener('change', (e) => { filterMultiApply = e.target.checked; updateView(); });
     container.querySelector('#chk-ca-show-ended')?.addEventListener('change', (e) => { showEndedSelections = e.target.checked; updateView(); });
+
+    container.querySelectorAll('button[data-ca-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const selId = btn.getAttribute('data-id');
+        const act = btn.getAttribute('data-ca-action');
+        store.handleCaAction(selId, act);
+        updateView();
+      });
+    });
 
     container.querySelectorAll('.btn-ca-detail').forEach(btn => {
       btn.addEventListener('click', () => onOpenDetail(btn.getAttribute('data-id')));
@@ -6467,23 +6670,23 @@ function renderCompanyActionListView(container, { onOpenDetail, onOpenEmailCompo
 
     container.innerHTML = `
       <div class="space-y-5">
-        <!-- 画面ヘッダー (指示書 3, 4項) -->
-        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <!-- 画面ヘッダー -->
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+              <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
               企業対応
             </h2>
-            <p class="text-xs text-slate-500 mt-0.5">企業ごとの緊急度と本日のRA対応・優先アクションを確認できます</p>
+            <p class="text-xs text-slate-500 mt-1">※企業に対する今なすべき次行動・アプローチ管理画面です。</p>
           </div>
 
           <div class="flex items-center space-x-3 text-xs">
             <label class="inline-flex items-center space-x-1.5 font-bold text-slate-700 cursor-pointer">
-              <input type="checkbox" id="chk-action-only-mine" ${filterOnlyMine ? 'checked' : ''} class="rounded text-indigo-600">
-              <span>自分の担当企業のみ表示</span>
+              <input type="checkbox" id="chk-ra-only-mine" ${filterOnlyMine ? 'checked' : ''} class="rounded text-amber-600">
+              <span>自分の担当企業のみ</span>
             </label>
 
-            <select id="select-action-ra-filter" class="bg-slate-50 border border-slate-300 font-bold rounded px-3 py-1.5 text-slate-800 focus:outline-none">
+            <select id="select-ra-filter" class="bg-slate-50 border border-slate-300 font-bold rounded px-3 py-2 text-slate-800 focus:outline-none">
               <option value="">すべてのRA担当</option>
               ${raConsultants.map(c => `<option value="${c.consultantId}" ${filterRaId === c.consultantId ? 'selected' : ''}>${c.name} (RA)</option>`).join('')}
             </select>
@@ -6658,15 +6861,24 @@ function renderCompanyActionListView(container, { onOpenDetail, onOpenEmailCompo
                               </div>
                             </div>
 
-                            <!-- 右ブロック: 操作 (指示書 17, 26項) -->
-                            <div class="flex items-center space-x-1.5 shrink-0 justify-end">
-                              <button class="btn-action-single-email px-2.5 py-1 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded font-bold text-xs transition border border-indigo-200" data-company-id="${comp.companyId}" data-selection-id="${s.selectionId}">
-                                メール
+                            <!-- 右ブロック: ワンクリック操作 (指示書 17項) -->
+                            <div class="flex flex-wrap items-center space-x-1 justify-end shrink-0">
+                              <button class="btn-action-single-email px-2 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded font-bold text-[10px] transition" data-company-id="${comp.companyId}" data-selection-id="${s.selectionId}">
+                                メール作成
                               </button>
-                              <button class="btn-action-single-contacted px-2 py-1 bg-slate-100 hover:bg-slate-800 hover:text-white text-slate-700 rounded font-bold text-xs transition border border-slate-200" data-company-id="${comp.companyId}" data-selection-id="${s.selectionId}">
-                                完了
+                              <button data-ra-action="CONTACTED" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded font-bold text-[10px] transition">
+                                連絡済
                               </button>
-                              <button class="btn-action-cand-detail px-2 py-1 bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 rounded font-bold text-xs transition border border-slate-200" data-id="${s.selectionId}">
+                              <button data-ra-action="PASS" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-[10px] transition">
+                                通過
+                              </button>
+                              <button data-ra-action="REJECT" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold text-[10px] transition">
+                                見送り
+                              </button>
+                              <button data-ra-action="DATES_AVAILABLE" data-sel-id="${s.selectionId}" class="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded font-bold text-[10px] transition">
+                                日程候補あり
+                              </button>
+                              <button class="btn-action-cand-detail px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold text-[10px] transition" data-id="${s.selectionId}">
                                 詳細
                               </button>
                             </div>
@@ -6788,6 +7000,16 @@ function renderCompanyActionListView(container, { onOpenDetail, onOpenEmailCompo
       btn.addEventListener('click', () => {
         const selId = btn.getAttribute('data-selection-id');
         store.updateSelection(selId, { companyActionStatus: '完了' }, '個別の企業対応完了');
+        updateView({ preserveScroll: true });
+      });
+    });
+
+    container.querySelectorAll('button[data-ra-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const selId = btn.getAttribute('data-sel-id');
+        const act = btn.getAttribute('data-ra-action');
+        saveActionState({ scrollTop: window.scrollY || document.documentElement.scrollTop });
+        store.handleRaAction(selId, act);
         updateView({ preserveScroll: true });
       });
     });

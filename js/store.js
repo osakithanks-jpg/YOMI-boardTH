@@ -1098,6 +1098,167 @@ class Store {
     this.setItem(STORAGE_KEYS.CONSULTANTS, list);
   }
 
+  // --- ワンクリック操作 ＆ 自動バトン連携 (指示書 18, 19, 20, 21, 22項) ---
+  handleRaAction(selectionId, actionType, customParams = {}) {
+    const selections = this.getItem(STORAGE_KEYS.SELECTIONS);
+    const idx = selections.findIndex(s => s.selectionId === selectionId);
+    if (idx < 0) return;
+
+    const sel = selections[idx];
+    const user = this.getCurrentConsultant();
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const next2BizDays = new Date();
+    next2BizDays.setDate(next2BizDays.getDate() + 2);
+    const next2BizStr = next2BizDays.toISOString().split('T')[0];
+
+    let currentBall = sel.currentBall || 'RA';
+    let companyActionStatus = sel.companyActionStatus || '要企業対応';
+    let nextAction = sel.nextAction || '';
+
+    let logTitle = '';
+    let logDetail = '';
+
+    if (actionType === 'CONTACTED') {
+      currentBall = 'COMPANY';
+      companyActionStatus = '企業回答待ち';
+      nextAction = '企業からの回答待ち';
+      sel.lastContactDate = todayStr;
+      sel.nextFollowDate = next2BizStr;
+      logTitle = 'RA：企業へ連絡済み';
+      logDetail = '現在のボール: RA → 企業（状態: 企業回答待ち）';
+    } else if (actionType === 'PASS') {
+      currentBall = 'CA';
+      companyActionStatus = 'CA確認待ち';
+      nextAction = '候補者へ通過連絡';
+      sel.lastCompanyResponseDate = todayStr;
+      logTitle = 'RA：通過登録';
+      logDetail = '現在のボール: 企業 → CA（次の行動: 候補者へ通過連絡）';
+    } else if (actionType === 'REJECT') {
+      currentBall = 'CA';
+      companyActionStatus = 'CA確認待ち';
+      nextAction = '候補者へ見送り連絡';
+      sel.lastCompanyResponseDate = todayStr;
+      logTitle = 'RA：見送り登録';
+      logDetail = '現在のボール: 企業 → CA（次の行動: 候補者へ見送り連絡）';
+    } else if (actionType === 'DATES_AVAILABLE') {
+      currentBall = 'CA';
+      companyActionStatus = 'CA確認待ち';
+      nextAction = '候補者へ候補日確認';
+      sel.lastCompanyResponseDate = todayStr;
+      logTitle = 'RA：日程候補あり';
+      logDetail = '現在のボール: 企業 → CA（次の行動: 候補者へ候補日確認）';
+    } else if (actionType === 'OFFER_AVAILABLE') {
+      currentBall = 'CA';
+      companyActionStatus = 'CA確認待ち';
+      nextAction = '候補者へ条件提示・意向確認';
+      sel.lastCompanyResponseDate = todayStr;
+      logTitle = 'RA：条件提示あり';
+      logDetail = '現在のボール: 企業 → CA（次の行動: 候補者へ条件提示・意向確認）';
+    } else if (actionType === 'HOLD') {
+      currentBall = 'RA';
+      companyActionStatus = '企業対応中';
+      nextAction = '企業へ再確認';
+      logTitle = 'RA：回答保留';
+      logDetail = '現在のボール: RA（次の行動: 企業へ再確認）';
+    }
+
+    selections[idx] = {
+      ...sel,
+      ...customParams,
+      currentBall,
+      companyActionStatus,
+      nextAction,
+      updatedAt: new Date().toISOString(),
+      updatedBy: user.name
+    };
+
+    this.addHistoryRecord(selectionId, logTitle, logDetail, 'RA');
+    this.setItem(STORAGE_KEYS.SELECTIONS, selections);
+  }
+
+  handleCaAction(selectionId, actionType, customParams = {}) {
+    const selections = this.getItem(STORAGE_KEYS.SELECTIONS);
+    const idx = selections.findIndex(s => s.selectionId === selectionId);
+    if (idx < 0) return;
+
+    const sel = selections[idx];
+    const user = this.getCurrentConsultant();
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    let currentBall = sel.currentBall || 'CA';
+    let companyActionStatus = sel.companyActionStatus || 'CA対応中';
+    let nextAction = sel.nextAction || '';
+
+    let logTitle = '';
+    let logDetail = '';
+
+    if (actionType === 'CONTACTED') {
+      currentBall = 'CA';
+      sel.lastCaContactDate = todayStr;
+      logTitle = 'CA：候補者へ連絡済み';
+      logDetail = '候補者への連絡日を更新しました。';
+    } else if (actionType === 'GOT_DATES') {
+      currentBall = 'RA';
+      companyActionStatus = '要企業対応';
+      nextAction = '企業へ候補日を提出';
+      logTitle = 'CA：候補日を取得';
+      logDetail = '現在のボール: CA → RA（次の行動: 企業へ候補日を提出）';
+    } else if (actionType === 'WAITING_CANDIDATE') {
+      currentBall = 'CA';
+      nextAction = '候補者からの回答待ち';
+      logTitle = 'CA：候補者回答待ち';
+      logDetail = '現在のボール: CA（次の行動: 候補者からの回答待ち）';
+    } else if (actionType === 'ACCEPT_INTENT') {
+      currentBall = 'RA';
+      companyActionStatus = '要企業対応';
+      nextAction = '企業へ内定承諾を連絡';
+      logTitle = 'CA：承諾意向確認';
+      logDetail = '現在のボール: CA → RA（次の行動: 企業へ内定承諾を連絡）';
+    } else if (actionType === 'CONSIDER') {
+      currentBall = 'CA';
+      nextAction = '意向醸成フォロー';
+      logTitle = 'CA：検討中';
+      logDetail = '意向醸成フォローを継続します。';
+    } else if (actionType === 'DECLINE_INTENT') {
+      currentBall = 'RA';
+      companyActionStatus = '要企業対応';
+      nextAction = '企業へ辞退連絡';
+      logTitle = 'CA：辞退意向';
+      logDetail = '現在のボール: CA → RA（次の行動: 企業へ辞退連絡）';
+    }
+
+    selections[idx] = {
+      ...sel,
+      ...customParams,
+      currentBall,
+      companyActionStatus,
+      nextAction,
+      updatedAt: new Date().toISOString(),
+      updatedBy: user.name
+    };
+
+    this.addHistoryRecord(selectionId, logTitle, logDetail, 'CA');
+    this.setItem(STORAGE_KEYS.SELECTIONS, selections);
+  }
+
+  addHistoryRecord(selectionId, title, detail, role = 'SYSTEM') {
+    const histories = this.getItem(STORAGE_KEYS.HISTORIES);
+    const user = this.getCurrentConsultant();
+
+    histories.push({
+      historyId: 'hist_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+      selectionId,
+      actionTitle: title,
+      detail,
+      role,
+      changedBy: user.name,
+      changedAt: new Date().toISOString()
+    });
+
+    this.setItem(STORAGE_KEYS.HISTORIES, histories);
+  }
+
   saveCompanySubmission(submissionData) {
     const list = this.getItem(STORAGE_KEYS.COMPANY_SUBMISSIONS);
     const user = this.getCurrentConsultant();

@@ -94,6 +94,30 @@ export function renderCaView(container, { onOpenDetail }) {
           </div>
         </div>
 
+        <!-- 本日のCA対応 サマリー (指示書 11項) -->
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div class="bg-rose-50/70 p-3 rounded-lg border border-rose-200 cursor-pointer hover:bg-rose-100 transition" id="ca-sum-overdue">
+            <div class="text-[11px] font-extrabold text-rose-800">期限超過</div>
+            <div class="text-xl font-black text-rose-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => getSelectionAlerts(s).isOverdue)).length}<span class="text-xs font-normal text-rose-700 ml-1">件</span></div>
+          </div>
+          <div class="bg-amber-50/70 p-3 rounded-lg border border-amber-200 cursor-pointer hover:bg-amber-100 transition" id="ca-sum-contact">
+            <div class="text-[11px] font-extrabold text-amber-800">候補者連絡</div>
+            <div class="text-xl font-black text-amber-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => s.currentBall === 'CA')).length}<span class="text-xs font-normal text-amber-700 ml-1">件</span></div>
+          </div>
+          <div class="bg-indigo-50/70 p-3 rounded-lg border border-indigo-200 cursor-pointer hover:bg-indigo-100 transition" id="ca-sum-dates">
+            <div class="text-[11px] font-extrabold text-indigo-800">候補日確認</div>
+            <div class="text-xl font-black text-indigo-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => (s.nextAction || '').includes('候補日'))).length}<span class="text-xs font-normal text-indigo-700 ml-1">件</span></div>
+          </div>
+          <div class="bg-purple-50/70 p-3 rounded-lg border border-purple-200 cursor-pointer hover:bg-purple-100 transition" id="ca-sum-intent">
+            <div class="text-[11px] font-extrabold text-purple-800">意向確認</div>
+            <div class="text-xl font-black text-purple-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => (s.nextAction || '').includes('意向'))).length}<span class="text-xs font-normal text-purple-700 ml-1">件</span></div>
+          </div>
+          <div class="bg-emerald-50/70 p-3 rounded-lg border border-emerald-200 cursor-pointer hover:bg-emerald-100 transition" id="ca-sum-ra-reply">
+            <div class="text-[11px] font-extrabold text-emerald-800">RAから回答あり</div>
+            <div class="text-xl font-black text-emerald-600 mt-1">${filtered.filter(c => c.activeSelections.some(s => s.companyActionStatus === 'CA確認待ち')).length}<span class="text-xs font-normal text-emerald-700 ml-1">件</span></div>
+          </div>
+        </div>
+
         <!-- 検索 & フィルター (指示書 9項) -->
         <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center gap-3 text-xs">
           <input type="text" id="input-ca-search-kw" value="${searchCandName}" placeholder="候補者名 / フリガナで検索..." class="bg-slate-50 border border-slate-300 rounded px-3 py-1.5 focus:outline-none focus:bg-white focus:border-indigo-600 min-w-[200px]">
@@ -171,7 +195,10 @@ export function renderCaView(container, { onOpenDetail }) {
 
                         return `
                           <tr class="${isEnded ? 'bg-slate-100/70 text-slate-400' : 'hover:bg-indigo-50/30'} transition">
-                            <td class="px-4 py-2.5 font-bold text-slate-900">${comp ? comp.name : s.companyName}</td>
+                            <td class="px-4 py-2.5 font-bold text-slate-900">
+                              <div>${comp ? comp.name : s.companyName}</div>
+                              <div class="text-[10px] text-indigo-700 font-semibold mt-0.5">次行動: ${s.nextAction || '候補者連絡'}</div>
+                            </td>
                             <td class="px-4 py-2.5 text-slate-700">${job ? (job.title || job.jobName) : s.jobName}</td>
                             <td class="px-3 py-2.5 text-slate-600">${ra ? ra.name.split(' ')[0] : s.raName || '-'}</td>
                             <td class="px-3 py-2.5 font-bold">
@@ -186,7 +213,13 @@ export function renderCaView(container, { onOpenDetail }) {
                               </div>
                             </td>
                             <td class="px-3 py-2.5 text-center">
-                              <button class="btn-ca-detail px-2.5 py-1 bg-slate-100 hover:bg-indigo-600 hover:text-white rounded text-xs transition" data-id="${s.selectionId}">詳細</button>
+                              <div class="flex items-center justify-end space-x-1">
+                                <button data-ca-action="CONTACTED" data-id="${s.selectionId}" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-[10px] font-bold">連絡済</button>
+                                <button data-ca-action="GOT_DATES" data-id="${s.selectionId}" class="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-bold">候補日取得</button>
+                                <button data-ca-action="ACCEPT_INTENT" data-id="${s.selectionId}" class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold">承諾意向</button>
+                                <button data-ca-action="DECLINE_INTENT" data-id="${s.selectionId}" class="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-bold">辞退意向</button>
+                                <button class="btn-ca-detail px-2 py-0.5 bg-slate-100 hover:bg-indigo-600 hover:text-white rounded text-[10px] font-bold transition" data-id="${s.selectionId}">詳細</button>
+                              </div>
                             </td>
                           </tr>
                         `;
@@ -208,6 +241,15 @@ export function renderCaView(container, { onOpenDetail }) {
     container.querySelector('#chk-ca-has-offer')?.addEventListener('change', (e) => { filterHasOffer = e.target.checked; updateView(); });
     container.querySelector('#chk-ca-multi-apply')?.addEventListener('change', (e) => { filterMultiApply = e.target.checked; updateView(); });
     container.querySelector('#chk-ca-show-ended')?.addEventListener('change', (e) => { showEndedSelections = e.target.checked; updateView(); });
+
+    container.querySelectorAll('button[data-ca-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const selId = btn.getAttribute('data-id');
+        const act = btn.getAttribute('data-ca-action');
+        store.handleCaAction(selId, act);
+        updateView();
+      });
+    });
 
     container.querySelectorAll('.btn-ca-detail').forEach(btn => {
       btn.addEventListener('click', () => onOpenDetail(btn.getAttribute('data-id')));
