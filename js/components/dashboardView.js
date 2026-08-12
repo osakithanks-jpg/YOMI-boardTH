@@ -452,45 +452,4 @@ export function renderDashboard(container, { onOpenDetail, onNavigateToSelection
   }
 
   updateView({ preserveScroll: false });
-}ect-fiscal-q')?.addEventListener('change', (e) => {
-      selectedQuarter = e.target.value;
-      saveDashboardState({ quarter: selectedQuarter });
-      updateView();
-    });
-
-    container.querySelector('#select-dashboard-consultant')?.addEventListener('change', (e) => {
-      selectedConsultantId = e.target.value;
-      saveDashboardState({ consultantId: selectedConsultantId });
-      updateView();
-    });
-
-    container.querySelector('#btn-dashboard-role-ca')?.addEventListener('click', () => {
-      activeRoleType = 'CA';
-      saveDashboardState({ roleType: 'CA' });
-      updateView();
-    });
-
-    container.querySelector('#btn-dashboard-role-ra')?.addEventListener('click', () => {
-      activeRoleType = 'RA';
-      saveDashboardState({ roleType: 'RA' });
-      updateView();
-    });
-
-    container.querySelectorAll('.btn-detail').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const selId = btn.getAttribute('data-id');
-        if (onOpenDetail) {
-          onOpenDetail(selId);
-        } else if (onNavigateToSelections) {
-          onNavigateToSelections(selId);
-        }
-      });
-    if (options.preserveScroll !== false && savedScrollY > 0) {
-      setTimeout(() => {
-        window.scrollTo({ top: savedScrollY, behavior: 'instant' });
-      }, 0);
-    }
-  }
-
-  updateView({ preserveScroll: false });
 }
