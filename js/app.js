@@ -127,6 +127,9 @@ class App {
         renderKanbanView(contentContainer, {
           onOpenDetail: (selectionId) => {
             openSelectionDetailModal(selectionId, () => this.render());
+          },
+          onNavigateToCompanyActions: (filterUrgencyCode) => {
+            this.navigateTo(VIEWS.COMPANY_ACTIONS, { filterUrgencyCode });
           }
         });
         break;
