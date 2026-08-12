@@ -276,19 +276,25 @@ export function renderDashboard(container, { onNavigateToSelections, onNavigateT
                   const percentStr = Math.round(normalizedYomiVal * 100) + '%';
 
                   return `
-                    <tr class="hover:bg-indigo-50/40 transition">
-                      <td class="px-4 py-2.5 font-bold text-slate-900">${s.candidateName}</td>
-                      <td class="px-4 py-2.5 font-medium text-slate-800">${comp ? comp.name : s.companyName}</td>
-                      <td class="px-4 py-2.5 text-slate-600">${job ? (job.title || job.jobName) : s.jobName}</td>
-                      <td class="px-3 py-2.5 font-semibold text-slate-700">${caCons ? caCons.name : (s.caName || '-')}</td>
-                      <td class="px-3 py-2.5 font-semibold text-slate-700">${raCons ? raCons.name : (s.raName || '-')}</td>
-                      <td class="px-3 py-2.5 font-semibold text-indigo-700">${s.phase}</td>
-                      <td class="px-3 py-2.5 text-right font-black ${normalizedYomiVal > 0 ? 'text-indigo-600' : 'text-slate-400'}">${percentStr}</td>
-                      <td class="px-3 py-2.5 font-mono text-slate-700 font-bold">${s.expectedCompletionMonth || s.actionDeadline || '-'}</td>
-                      <td class="px-3 py-2.5 text-center">
-                        <button class="btn-detail px-2.5 py-1 bg-slate-100 hover:bg-indigo-600 hover:text-white rounded text-xs transition" data-id="${s.selectionId}">詳細</button>
-                      </td>
-                    </tr>
+                  <tr class="hover:bg-indigo-50/40 transition">
+                    <td class="px-4 py-2.5 font-bold text-slate-900">
+                      <div>${s.candidateName}</div>
+                      <div class="text-[10px] text-indigo-600 font-semibold">次行動: ${s.nextAction || '要確認'}</div>
+                    </td>
+                    <td class="px-4 py-2.5 font-medium text-slate-800">${comp ? comp.name : s.companyName}</td>
+                    <td class="px-4 py-2.5 text-slate-600">${job ? (job.title || job.jobName) : s.jobName}</td>
+                    <td class="px-3 py-2.5 font-semibold text-slate-700">${caCons ? caCons.name : (s.caName || '-')}</td>
+                    <td class="px-3 py-2.5 font-semibold text-slate-700">${raCons ? raCons.name : (s.raName || '-')}</td>
+                    <td class="px-3 py-2.5 font-semibold text-indigo-700">
+                      <div>${s.phase}</div>
+                      <span class="text-[9px] font-bold ${s.currentBall === 'CA' ? 'bg-indigo-100 text-indigo-800' : (s.currentBall === 'RA' ? 'bg-sky-100 text-sky-800' : 'bg-amber-100 text-amber-800')} px-1.5 py-0.2 rounded">ボール: ${s.currentBall || 'CA'}</span>
+                    </td>
+                    <td class="px-3 py-2.5 text-right font-black ${normalizedYomiVal > 0 ? 'text-indigo-600' : 'text-slate-400'}">${percentStr}</td>
+                    <td class="px-3 py-2.5 font-mono text-slate-700 font-bold">${s.expectedCompletionMonth || s.actionDeadline || '-'}</td>
+                    <td class="px-3 py-2.5 text-center">
+                      <button class="btn-detail px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded text-xs transition shadow-2xs" data-id="${s.selectionId}">詳細</button>
+                    </td>
+                  </tr>
                   `;
                 }).join('')}
               </tbody>
