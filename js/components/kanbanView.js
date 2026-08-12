@@ -40,6 +40,17 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
     const savedScrollLeft = options.preserveScroll !== false ? (savedState.scrollLeft || 0) : 0;
 
+    const isLoading = store.isLoading ? store.isLoading() : false;
+    if (isLoading) {
+      container.innerHTML = `
+        <div class="p-12 text-center bg-white border border-slate-200 rounded-2xl shadow-sm space-y-3">
+          <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-600 border-t-transparent"></div>
+          <p class="text-slate-700 font-bold text-sm">選考案件を読み込んでいます...</p>
+        </div>
+      `;
+      return;
+    }
+
     const selections = store.getSelections() || [];
     const companies = store.getCompanies() || [];
     const jobs = store.getJobs() || [];
@@ -55,7 +66,7 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
     today.setHours(0, 0, 0, 0);
 
     const activeSelections = selections.filter(s => {
-      if (!s || s.isArchived) return false;
+      if (!s || s.isArchived || s.isDeleted) return false;
       const p = s.phase || '';
       return p !== '選考終了' && p !== '書類見送り' && p !== '面接見送り' && p !== '候補者辞退' && p !== '他社決定';
     });
@@ -101,26 +112,41 @@ export function renderKanbanView(container, { onOpenDetail, onNavigateToCompanyA
       let targetCas = consultants.filter(c => {
         if (!c || c.isArchived || c.status === 'inactive') return false;
         if (c.roles && Array.isArray(c.roles)) return c.roles.includes('CA') || c.roles.includes('ADMIN');
-        return c.roleType === 'CA' || c.roleType === 'ADMIN' || !c.roleType;
+        return c.roleType === 'CA' || c.roleType === 'ADMIN' || c.role === 'CA' || !c.roleType;
       });
+
       if (targetCas.length === 0) targetCas = consultants;
       if (filterCaId) targetCas = targetCas.filter(c => c.consultantId === filterCaId);
       if (searchKeyword) {
         const kw = searchKeyword.toLowerCase();
         targetCas = targetCas.filter(c => (c.name || '').toLowerCase().includes(kw));
       }
+
       const registeredCaIds = new Set(targetCas.map(c => c.consultantId));
+
       columns = targetCas.map(c => ({
         id: c.consultantId,
         title: `${c.name} (CA)`,
-        filterFn: (s) => (s.caId && s.caId === c.consultantId) || (s.caConsultantId && s.caConsultantId === c.consultantId) || (s.caName && s.caName.includes((c.name || '').split(' ')[0]))
+        filterFn: (s) => {
+          if (s.caId && s.caId === c.consultantId) return true;
+          if (s.caConsultantId && s.caConsultantId === c.consultantId) return true;
+          if (s.caEmail && c.email && s.caEmail.toLowerCase() === c.email.toLowerCase()) return true;
+          if (s.caName && c.name && s.caName.includes((c.name || '').split(' ')[0])) return true;
+          return false;
+        }
       }));
-      const hasUnassignedCa = enrichedSelections.some(s => !s.caId && !s.caConsultantId && (!s.caName || !registeredCaIds.has(s.caId)));
+
+      // 指示書 9項: ID・メール・名前のどれでも判定できない案件は「担当CA未設定」列へ
+      const hasUnassignedCa = enrichedSelections.some(s => {
+        if (!s.caId && !s.caConsultantId && !s.caEmail && !s.caName) return true;
+        return !columns.some(col => col.filterFn(s));
+      });
+
       if (hasUnassignedCa) {
         columns.push({
           id: 'UNASSIGNED_CA',
           title: '担当CA未設定',
-          filterFn: (s) => !s.caId && !s.caConsultantId
+          filterFn: (s) => !columns.some(col => col.id !== 'UNASSIGNED_CA' && col.filterFn(s))
         });
       }
     } else {
