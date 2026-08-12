@@ -3597,7 +3597,7 @@ function renderHeader(container, { onOpenNewSelection, onOpenCsvImport, activeVi
               選考進捗・ヨミ管理システム
               <span class="text-xs bg-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded border border-indigo-400/30">サンクスパートナーズ</span>
             </h1>
-            <p class="text-xs text-slate-400">${activeViewTitle || '全体ダッシュボード'}</p>
+            <p class="text-xs text-slate-400">${activeViewTitle || '企業対応'}</p>
           </div>
         </div>
 
@@ -3698,9 +3698,9 @@ const VIEWS = {
 function renderSidebar(container, activeView, onSelectView) {
   const menuItems = [
     {
-      id: VIEWS.DASHBOARD,
-      title: '全体ダッシュボード',
-      icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 00-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>`
+      id: VIEWS.COMPANY_ACTIONS,
+      title: '企業対応',
+      icon: `<svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>`
     },
     {
       id: VIEWS.KANBAN,
@@ -3708,15 +3708,11 @@ function renderSidebar(container, activeView, onSelectView) {
       icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 01-2 2m0 10V7m6 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 01-2 2"></path></svg>`
     },
     {
-      id: VIEWS.COMPANY_ACTIONS,
-      title: '企業対応',
-      icon: `<svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>`
-    },
-    {
       id: VIEWS.COMPANIES,
       title: '企業別提出',
       icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>`
     },
+
     {
       id: VIEWS.JOBS,
       title: '求人・ポジション別',
@@ -10753,7 +10749,7 @@ async function renderSyncDiagnosticView(container) {
 
 class App {
   constructor() {
-    this.currentView = (window.location.hash === '#sync-diagnostic') ? 'syncDiagnostic' : VIEWS.DASHBOARD;
+    this.currentView = (window.location.hash === '#sync-diagnostic') ? 'syncDiagnostic' : VIEWS.COMPANY_ACTIONS;
     this.viewFilters = {};
     this.directFetchResult = null;
     this.init();
@@ -10820,58 +10816,18 @@ class App {
         renderSyncDiagnosticView(viewContainer);
         break;
 
+      // 旧ビューおよび全体ダッシュボードからの統一リダイレクト（企業対応へ一本化）
       case VIEWS.DASHBOARD:
-        renderDashboard(viewContainer, {
-          onNavigateToSelections: (filters = {}) => {
-            this.currentView = VIEWS.SELECTIONS;
-            this.viewFilters = filters;
-            this.render();
-          },
-          onNavigateToConsultant: (consultantId) => {
-            this.currentView = VIEWS.CONSULTANTS;
-            this.viewFilters = { consultantId };
-            this.render();
-          },
-          onNavigateToCompany: (companyId) => {
-            this.currentView = VIEWS.COMPANIES;
-            this.viewFilters = { companyId };
-            this.render();
-          }
-        });
-        break;
-
-      case VIEWS.SELECTIONS:
-        renderSelectionList(contentContainer, {
-          initialFilter: this.viewFilters,
-          onOpenDetail: (selectionId) => {
-            openSelectionDetailModal(selectionId, () => this.render());
-          },
-          onOpenNewModal: () => {
-            openNewSelectionModal(() => this.render());
-          }
-        });
-        break;
-
-      case VIEWS.KANBAN:
-        renderKanbanView(contentContainer, {
-          onOpenDetail: (selectionId) => {
-            openSelectionDetailModal(selectionId, () => this.render());
-          },
-          onNavigateToCompanyActions: (filterUrgencyCode) => {
-            this.currentView = VIEWS.COMPANY_ACTIONS;
-            this.viewFilters = { filterUrgencyCode };
-            this.render();
-          }
-        });
-        break;
-
-      // 旧ビューからのリダイレクト対応 (Step 28項)
       case VIEWS.SELECTIONS:
       case VIEWS.CA:
+      case VIEWS.RA:
       case VIEWS.CONSULTANTS:
-        renderDashboard(contentContainer, {
+        renderCompanyActionListView(contentContainer, {
           onOpenDetail: (selectionId) => {
             openSelectionDetailModal(selectionId, () => this.render());
+          },
+          onOpenEmailComposer: (companyId, selectionIds = null) => {
+            openEmailComposerModal(companyId, selectionIds);
           }
         });
         break;

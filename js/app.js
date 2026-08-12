@@ -24,7 +24,7 @@ import { fetchSelectionsFromServerDirect, migrateLocalDataToFirestore, seedAllIn
 
 class App {
   constructor() {
-    this.currentView = (window.location.hash === '#sync-diagnostic') ? 'syncDiagnostic' : VIEWS.DASHBOARD;
+    this.currentView = (window.location.hash === '#sync-diagnostic') ? 'syncDiagnostic' : VIEWS.COMPANY_ACTIONS;
     this.viewFilters = {};
     this.directFetchResult = null;
     this.init();
@@ -91,58 +91,18 @@ class App {
         renderSyncDiagnosticView(viewContainer);
         break;
 
+      // 旧ビューおよび全体ダッシュボードからの統一リダイレクト（企業対応へ一本化）
       case VIEWS.DASHBOARD:
-        renderDashboard(viewContainer, {
-          onNavigateToSelections: (filters = {}) => {
-            this.currentView = VIEWS.SELECTIONS;
-            this.viewFilters = filters;
-            this.render();
-          },
-          onNavigateToConsultant: (consultantId) => {
-            this.currentView = VIEWS.CONSULTANTS;
-            this.viewFilters = { consultantId };
-            this.render();
-          },
-          onNavigateToCompany: (companyId) => {
-            this.currentView = VIEWS.COMPANIES;
-            this.viewFilters = { companyId };
-            this.render();
-          }
-        });
-        break;
-
-      case VIEWS.SELECTIONS:
-        renderSelectionList(contentContainer, {
-          initialFilter: this.viewFilters,
-          onOpenDetail: (selectionId) => {
-            openSelectionDetailModal(selectionId, () => this.render());
-          },
-          onOpenNewModal: () => {
-            openNewSelectionModal(() => this.render());
-          }
-        });
-        break;
-
-      case VIEWS.KANBAN:
-        renderKanbanView(contentContainer, {
-          onOpenDetail: (selectionId) => {
-            openSelectionDetailModal(selectionId, () => this.render());
-          },
-          onNavigateToCompanyActions: (filterUrgencyCode) => {
-            this.currentView = VIEWS.COMPANY_ACTIONS;
-            this.viewFilters = { filterUrgencyCode };
-            this.render();
-          }
-        });
-        break;
-
-      // 旧ビューからのリダイレクト対応 (Step 28項)
       case VIEWS.SELECTIONS:
       case VIEWS.CA:
+      case VIEWS.RA:
       case VIEWS.CONSULTANTS:
-        renderDashboard(contentContainer, {
+        renderCompanyActionListView(contentContainer, {
           onOpenDetail: (selectionId) => {
             openSelectionDetailModal(selectionId, () => this.render());
+          },
+          onOpenEmailComposer: (companyId, selectionIds = null) => {
+            openEmailComposerModal(companyId, selectionIds);
           }
         });
         break;
