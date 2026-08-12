@@ -161,7 +161,13 @@ export async function fetchServerReadDirect(collectionName = "selections") {
   if (!firestore) return [];
 
   try {
-    const snapshot = await firestore.collection(collectionName).get({ source: 'server' });
+    let snapshot;
+    try {
+      snapshot = await firestore.collection(collectionName).get({ source: 'server' });
+    } catch (serverErr) {
+      console.warn("B_SERVER_READ_WARN: Falling back to default cache/store get query.", serverErr.message || serverErr);
+      snapshot = await firestore.collection(collectionName).get();
+    }
     
     const docsData = snapshot.docs.map((doc) => ({
       id: doc.id,
@@ -173,7 +179,6 @@ export async function fetchServerReadDirect(collectionName = "selections") {
       window.TERMINAL_B_DEBUG.serverReadCount = snapshot.size;
     }
 
-    // 指示書 6項: B_SERVER_READ ログ
     console.log("B_SERVER_READ", {
       count: snapshot.size,
       ids: snapshot.docs.map((doc) => doc.id),

@@ -14,6 +14,7 @@ $files = @(
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\selectionListView.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\selectionDetailModal.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\kanbanView.js",
+    "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\whiteboardV2.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\caView.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\raView.js",
     "C:\Users\yosak\.gemini\antigravity\scratch\selection-progress-app\js\components\companyActionListView.js",
