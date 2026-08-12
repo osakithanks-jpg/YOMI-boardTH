@@ -190,7 +190,11 @@ class App {
         break;
 
       default:
-        renderDashboard(contentContainer, {});
+        renderDashboard(contentContainer, {
+          onOpenDetail: (selectionId) => {
+            openSelectionDetailModal(selectionId, () => this.render());
+          }
+        });
         break;
     }
   }

@@ -27,7 +27,7 @@ function saveDashboardState(state) {
   } catch (e) {}
 }
 
-export function renderDashboard(container, { onNavigateToSelections, onNavigateToConsultant, onNavigateToCompany }) {
+export function renderDashboard(container, { onOpenDetail, onNavigateToSelections, onNavigateToConsultant, onNavigateToCompany }) {
   const savedState = getSavedDashboardState();
 
   const currentInitialFQ = getFiscalQuarterFromDate(new Date());
@@ -338,7 +338,11 @@ export function renderDashboard(container, { onNavigateToSelections, onNavigateT
     container.querySelectorAll('.btn-detail').forEach(btn => {
       btn.addEventListener('click', () => {
         const selId = btn.getAttribute('data-id');
-        if (onNavigateToSelections) onNavigateToSelections(selId);
+        if (onOpenDetail) {
+          onOpenDetail(selId);
+        } else if (onNavigateToSelections) {
+          onNavigateToSelections(selId);
+        }
       });
     });
   }
