@@ -69,13 +69,27 @@ function initFirebase() {
   }
 
   return db;
+async function ensureFirebaseAuth() {
+  const firestore = initFirebase();
+  if (typeof firebase !== 'undefined' && firebase.auth) {
+    const auth = firebase.auth();
+    if (!auth.currentUser) {
+      try {
+        await auth.signInAnonymously();
+        console.log("Firebase Auth (Anonymous) established successfully.", auth.currentUser ? auth.currentUser.uid : 'authenticated');
+      } catch (err) {
+        console.warn("Firebase Auth sign-in warning:", err.message || err);
+      }
+    }
+  }
+  return firestore;
 }
 
 /**
  * 指示書 1, 6項準拠: includeMetadataChanges: true を持つ端末B診断用 onSnapshot リスナー
  */
-function listenCollection(collectionName, callback) {
-  const firestore = initFirebase();
+async function listenCollection(collectionName, callback) {
+  const firestore = await ensureFirebaseAuth();
   const config = getFirebaseConfig();
 
   if (window.TERMINAL_B_DEBUG) {
@@ -84,7 +98,6 @@ function listenCollection(collectionName, callback) {
     window.TERMINAL_B_DEBUG.snapshotStarted = true;
   }
 
-  // 指示書 6項: ログ出力
   console.log("B_SNAPSHOT_STARTED");
 
   if (!firestore) {
@@ -157,7 +170,7 @@ function listenCollection(collectionName, callback) {
  * 指示書 6項: 強制サーバー読込 (getDocsFromServer 相当) ＆ B_SERVER_READ ログ
  */
 async function fetchServerReadDirect(collectionName = "selections") {
-  const firestore = initFirebase();
+  const firestore = await ensureFirebaseAuth();
   if (!firestore) return [];
 
   try {

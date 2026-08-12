@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 指示書 3, 4, 5項: 認証済みユーザー (request.auth != null, CA/RA/ADMIN/匿名認証含む) のみ読み書きを許可
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    match /selections/{selectionId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /candidates/{candidateId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /companies/{companyId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /jobs/{jobId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /consultants/{consultantId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /qTargets/{targetId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /histories/{historyId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /companyCommunications/{commId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /{document=**} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}
