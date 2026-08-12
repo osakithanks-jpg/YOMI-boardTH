@@ -357,8 +357,9 @@ export function openSelectionDetailModal(selectionId, onClose) {
     });
   });
 
-  // 保存処理 (指示書 10, 12, 16, 22項)
-  modalEl.querySelector('#btn-detail-save')?.addEventListener('click', () => {
+  // 保存処理 (指示书 5, 10, 11, 12, 18, 19, 22項)
+  modalEl.querySelector('#btn-detail-save')?.addEventListener('click', async () => {
+    const saveBtn = modalEl.querySelector('#btn-detail-save');
     const newPhase = phaseSelect.value;
     const newStatus = modalEl.querySelector('#detail-status').value;
     const newYomi = Number(yomiSelect.value);
@@ -421,7 +422,6 @@ export function openSelectionDetailModal(selectionId, onClose) {
     const caConsObj = consultants.find(c => c.consultantId === caId);
     const raConsObj = consultants.find(c => c.consultantId === raId);
 
-    // 手動設定保護オプションの判定 (指示書 10, 12, 16項)
     let saveOptions = { forceAuto: false, appendItem: false };
     const isPhaseOrStatusChanged = (newPhase !== selection.phase || newStatus !== selection.progressStatus);
 
@@ -441,7 +441,7 @@ export function openSelectionDetailModal(selectionId, onClose) {
       }
     }
 
-    store.updateSelection(selectionId, {
+    const payload = {
       phase: newPhase,
       progressStatus: newStatus,
       yomi: (newPhase === '選考終了' || newPhase === '内定辞退') ? 0 : newYomi,
@@ -468,10 +468,31 @@ export function openSelectionDetailModal(selectionId, onClose) {
       companySharedComment: modalEl.querySelector('#detail-company-shared-comment').value,
       internalMemo: modalEl.querySelector('#detail-internal-memo').value,
       companyActionSource: actionSourceState
-    }, '詳細モーダルからの保存', saveOptions);
+    };
 
-    modalEl.remove();
-    if (onClose) onClose();
+    // 指示書 5項: SAVE_SELECTION_PAYLOAD ログ出力
+    console.log("SAVE_SELECTION_PAYLOAD", {
+      selectionId,
+      ...payload
+    });
+
+    // 指示書 19項: 二重保存防止
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中...';
+
+    try {
+      // 指示書 18項: Firestore 保存完了を await 待ち
+      await store.updateSelection(selectionId, payload, '詳細モーダルからの保存', saveOptions);
+      
+      modalEl.remove();
+      if (onClose) onClose();
+    } catch (err) {
+      console.error("Selection update error:", err);
+      saveBtn.disabled = false;
+      saveBtn.textContent = '変更を保存する';
+      // 指示書 11項: 保存失敗時メッセージ
+      alert('保存に失敗しました。\nデータは更新されていません。');
+    }
   });
 
   modalEl.querySelector('#btn-detail-archive')?.addEventListener('click', () => {

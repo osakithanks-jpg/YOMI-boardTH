@@ -1366,10 +1366,10 @@ class Store {
     return newSelection;
   }
 
-  updateSelection(selectionId, updateFields, historyComment = '', options = {}) {
+  async updateSelection(selectionId, updateFields, historyComment = '', options = {}) {
     const selections = this.getItem(STORAGE_KEYS.SELECTIONS);
     const index = selections.findIndex(s => s.selectionId === selectionId);
-    if (index < 0) return;
+    if (index < 0) return false;
 
     const currentSelection = selections[index];
     let updatedSelection = { ...currentSelection, ...updateFields };
@@ -1384,7 +1384,7 @@ class Store {
     if (isPhaseChanged || isStatusChanged || isScheduleChanged || options.forceAuto) {
       const currentSource = updateFields.companyActionSource || currentSelection.companyActionSource || 'auto';
 
-      // 手動設定済みでかつ forceAuto でなく、手動指定が更新フィールドに含まれていない場合の保護判定 (指示書 8, 10, 12項)
+      // 手動設定済みでかつ forceAuto でなく、手動指定が更新フィールドに含まれていない場合の保護判定
       const hasManualAction = (currentSource === 'manual') && !options.forceAuto && !updateFields.companyActionType;
 
       if (!hasManualAction) {
@@ -1399,13 +1399,13 @@ class Store {
 
         updatedSelection = {
           ...updatedSelection,
-          companyActionType: derived.companyActionType,
-          companyActionStatus: derived.companyActionStatus,
+          companyActionType: derived.companyActionType || updatedSelection.companyActionType,
+          companyActionStatus: derived.companyActionStatus || updatedSelection.companyActionStatus,
           companyConfirmationItem: (options.appendItem && currentSelection.companyConfirmationItem)
             ? `${currentSelection.companyConfirmationItem} / 【自動判定】${derived.companyConfirmationItem}`
             : (derived.companyConfirmationItem || updatedSelection.companyConfirmationItem || ''),
-          nextAction: derived.nextAction,
-          nextActionTarget: derived.nextActionTarget,
+          nextAction: derived.nextAction || updatedSelection.nextAction,
+          nextActionTarget: derived.nextActionTarget || updatedSelection.nextActionTarget,
           actionDeadline: derived.actionDeadline || updatedSelection.actionDeadline,
           nextCompanyContactDate: derived.nextCompanyContactDate || updatedSelection.nextCompanyContactDate,
           companyActionSource: 'auto',
@@ -1413,32 +1413,37 @@ class Store {
           companyActionUpdatedBy: this.getCurrentConsultant().name
         };
 
-        // 連動履歴の記録 (指示書 22項)
         if (isPhaseChanged || isStatusChanged) {
           this.recordHistory(
             selectionId,
             '企業対応項目連動',
-            `${currentSelection.companyActionType || '-'} (${currentSelection.companyActionStatus || '未対応'})`,
-            `${derived.companyActionType} (${derived.companyActionStatus})`,
-            `選考フェーズ・進行状態の変更に伴うRA自動連動更新 [CA_SELECTION_UPDATE]`
+            `フェーズ/状態変更に伴う企業対応自動更新 (${updatedSelection.companyActionType})`,
+            'SYSTEM'
           );
         }
       }
     }
 
-    if (isPhaseChanged) {
-      updatedSelection.phaseUpdatedAt = new Date().toISOString();
-      this.recordHistory(selectionId, '選考フェーズ', currentSelection.phase, updateFields.phase, historyComment);
-    }
-
-    if (updateFields.yomi !== undefined && Number(updateFields.yomi) !== Number(currentSelection.yomi)) {
-      updatedSelection.yomiUpdatedAt = new Date().toISOString();
-      updatedSelection.yomiUpdatedBy = this.getCurrentConsultant().name;
-      this.recordHistory(selectionId, 'ヨミ', `${currentSelection.yomi * 100}%`, `${updateFields.yomi * 100}%`, historyComment || updateFields.yomiReason);
-    }
-
     selections[index] = updatedSelection;
+    this.recordHistory(
+      selectionId,
+      '選考状況更新',
+      historyComment || `フェーズ:${updatedSelection.phase} / 状態:${updatedSelection.progressStatus} / ヨミ:${Math.round(updatedSelection.yomi * 100)}%`,
+      'CA'
+    );
+
+    // 指示書 8, 9, 10, 22項: メモリ state 反映 ＆ Firestore への確実な await 書き込み
+    this.data.selections = selections;
     this.setItem(STORAGE_KEYS.SELECTIONS, selections);
+
+    try {
+      await saveFirestoreDoc('selections', String(selectionId), updatedSelection);
+      console.log("SAVE_SELECTION_PAYLOAD_SUCCESS", { selectionId, phase: updatedSelection.phase, progressStatus: updatedSelection.progressStatus, yomi: updatedSelection.yomi });
+      return true;
+    } catch (err) {
+      console.error("SAVE_SELECTION_PAYLOAD_FAILED", err);
+      throw err;
+    }
   }
 
   declineOtherSelectionsForCandidate(candidateId, targetSelectionId, reasonComment = '') {
