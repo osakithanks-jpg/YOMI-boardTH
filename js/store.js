@@ -1443,6 +1443,9 @@ class Store {
       console.warn("[SAVE] history write warning", hErr);
     }
 
+    // 全画面リスナーへ最新状態の同期をブロードキャスト (指示書 2, 5, 13, 25項)
+    this.notify();
+
     return true;
   }
 

@@ -1968,6 +1968,9 @@ class Store {
       console.warn("[SAVE] history write warning", hErr);
     }
 
+    // 全画面リスナーへ最新状態の同期をブロードキャスト (指示書 2, 5, 13, 25項)
+    this.notify();
+
     return true;
   }
 
@@ -5876,7 +5879,9 @@ function renderWhiteboardV2(container, { onOpenDetail, onNavigateToCompanyAction
   let axisMode = savedState.axisMode || 'ca'; // 'ca' または 'company'
   let searchKeyword = savedState.searchKeyword || '';
   let isRaSummaryOpen = savedState.isRaSummaryOpen !== undefined ? savedState.isRaSummaryOpen : true;
-  let isComposing = false;
+  const unsubscribe = store.subscribe(() => {
+    updateView({ preserveScroll: true });
+  });
 
   function updateView(options = {}) {
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
@@ -7082,6 +7087,10 @@ function renderCompanyActionListView(container, { onOpenDetail, onOpenEmailCompo
   let filterCaId = savedState.filterCaId || '';
   let searchKw = savedState.searchKw || '';
   let collapsedGroups = new Set(savedState.collapsedGroups || []);
+
+  const unsubscribe = store.subscribe(() => {
+    updateView({ preserveScroll: true });
+  });
 
   function updateView(options = {}) {
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;

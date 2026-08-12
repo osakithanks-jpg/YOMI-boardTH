@@ -86,6 +86,10 @@ export function renderCompanyActionListView(container, { onOpenDetail, onOpenEma
   let searchKw = savedState.searchKw || '';
   let collapsedGroups = new Set(savedState.collapsedGroups || []);
 
+  const unsubscribe = store.subscribe(() => {
+    updateView({ preserveScroll: true });
+  });
+
   function updateView(options = {}) {
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
 

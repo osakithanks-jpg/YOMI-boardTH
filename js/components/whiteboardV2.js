@@ -63,7 +63,9 @@ export function renderWhiteboardV2(container, { onOpenDetail, onNavigateToCompan
   let axisMode = savedState.axisMode || 'ca'; // 'ca' または 'company'
   let searchKeyword = savedState.searchKeyword || '';
   let isRaSummaryOpen = savedState.isRaSummaryOpen !== undefined ? savedState.isRaSummaryOpen : true;
-  let isComposing = false;
+  const unsubscribe = store.subscribe(() => {
+    updateView({ preserveScroll: true });
+  });
 
   function updateView(options = {}) {
     const savedScrollY = options.preserveScroll !== false ? (window.scrollY || document.documentElement.scrollTop) : 0;
