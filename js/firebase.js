@@ -71,20 +71,40 @@ export function initFirebase() {
   return db;
 }
 
-export async function ensureFirebaseAuth() {
+let authPromise = null;
+
+export function ensureFirebaseAuth() {
   const firestore = initFirebase();
-  if (typeof firebase !== 'undefined' && firebase.auth) {
-    const auth = firebase.auth();
-    if (!auth.currentUser) {
-      try {
-        await auth.signInAnonymously();
-        console.log("Firebase Auth (Anonymous) established successfully.", auth.currentUser ? auth.currentUser.uid : 'authenticated');
-      } catch (err) {
-        console.warn("Firebase Auth sign-in warning:", err.message || err);
+  if (!firestore) return Promise.resolve(null);
+
+  if (!authPromise) {
+    authPromise = new Promise((resolve) => {
+      if (typeof firebase !== 'undefined' && firebase.auth) {
+        const auth = firebase.auth();
+        const unsubscribe = auth.onAuthStateChanged((user) => {
+          if (user) {
+            console.log("Firebase Auth State Verified (onAuthStateChanged):", user.uid);
+            if (unsubscribe) unsubscribe();
+            resolve(firestore);
+          } else {
+            auth.signInAnonymously().then((cred) => {
+              console.log("Firebase Auth Anonymous Signed-in:", cred.user ? cred.user.uid : 'authenticated');
+              if (unsubscribe) unsubscribe();
+              resolve(firestore);
+            }).catch((err) => {
+              console.warn("Firebase Auth Sign-in Warning:", err.message || err);
+              if (unsubscribe) unsubscribe();
+              resolve(firestore);
+            });
+          }
+        });
+      } else {
+        resolve(firestore);
       }
-    }
+    });
   }
-  return firestore;
+
+  return authPromise;
 }
 
 /**
